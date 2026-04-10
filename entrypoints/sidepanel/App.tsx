@@ -17,11 +17,11 @@ import { toast } from 'sonner'
 type AppPage = 'home' | 'notes' | 'recording' | 'emr' | 'settings'
 
 const NAV_TABS: NavTab[] = [
-  { id: 'home', label: '首页', icon: <Home className="h-5 w-5" /> },
-  { id: 'notes', label: '笔记', icon: <FileText className="h-5 w-5" /> },
-  { id: 'recording', label: '录音', icon: <Mic className="h-5 w-5" /> },
+  { id: 'home', label: 'Home', icon: <Home className="h-5 w-5" /> },
+  { id: 'notes', label: 'Notes', icon: <FileText className="h-5 w-5" /> },
+  { id: 'recording', label: 'Record', icon: <Mic className="h-5 w-5" /> },
   { id: 'emr', label: 'EMR', icon: <ClipboardList className="h-5 w-5" /> },
-  { id: 'settings', label: '设置', icon: <Settings className="h-5 w-5" /> },
+  { id: 'settings', label: 'Settings', icon: <Settings className="h-5 w-5" /> },
 ]
 
 export default function App() {
@@ -42,7 +42,7 @@ export default function App() {
     setTimeout(() => {
       setIsLoggedIn(true)
       setIsLoggingIn(false)
-      toast.success(`欢迎回来，${username}！`)
+      toast.success(`Welcome back, ${username}!`)
     }, 800)
   }
 
@@ -50,20 +50,20 @@ export default function App() {
     setIsLoggedIn(false)
     setPatient(null)
     setCurrentPage('home')
-    toast.info('已退出登录')
+    toast.info('Signed out')
   }
 
   function handleSelectPatient(p: Patient) {
     setPatient(p)
-    toast.success(`已选择患者：${p.name}`)
+    toast.success(`Patient selected: ${p.name}`)
   }
 
   const PAGE_TITLES: Record<AppPage, string> = {
     home: 'FastDoc',
-    notes: '笔记',
-    recording: '录音',
-    emr: 'EMR 病历',
-    settings: '设置',
+    notes: 'Notes',
+    recording: 'Recording',
+    emr: 'EMR',
+    settings: 'Settings',
   }
 
   if (!isLoggedIn) {
@@ -85,7 +85,7 @@ export default function App() {
               size="icon"
               className="h-8 w-8"
               onClick={() => setPatientSheetOpen(true)}
-              aria-label="选择患者"
+              aria-label="Select patient"
             >
               <UserPlus className="h-4 w-4" />
             </Button>

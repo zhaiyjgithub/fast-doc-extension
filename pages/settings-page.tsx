@@ -1,7 +1,6 @@
 import * as React from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -57,12 +56,11 @@ export function SettingsPage({
   isDark,
   onToggleDark,
   onLogout,
-  username = '医生',
+  username = 'Physician',
 }: SettingsPageProps) {
   return (
     <ScrollArea className="h-full">
       <div className="space-y-5 px-4 py-4">
-        {/* Profile card */}
         <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-4">
           <Avatar className="h-14 w-14">
             <AvatarFallback className="text-lg font-semibold">
@@ -72,21 +70,20 @@ export function SettingsPage({
           <div>
             <p className="font-semibold">{username}</p>
             <Badge variant="secondary" className="mt-1 text-xs">
-              主治医师
+              Attending physician
             </Badge>
           </div>
         </div>
 
-        {/* Appearance */}
         <section className="space-y-1">
           <h3 className="px-1 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-            外观
+            Appearance
           </h3>
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <SettingsRow
               icon={isDark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-              label="深色模式"
-              description={isDark ? '当前：深色' : '当前：浅色'}
+              label="Dark mode"
+              description={isDark ? 'Currently: dark' : 'Currently: light'}
             >
               <Switch
                 id="dark-mode"
@@ -99,31 +96,30 @@ export function SettingsPage({
 
         <Separator />
 
-        {/* General */}
         <section className="space-y-1">
           <h3 className="px-1 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-            通用
+            General
           </h3>
           <div className="rounded-xl border border-border bg-card overflow-hidden divide-y divide-border">
             <SettingsRow
               icon={<Bell className="h-4 w-4" />}
-              label="通知设置"
-              description="推送与提醒"
+              label="Notifications"
+              description="Push and alerts"
               onClick={() => {}}
             >
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </SettingsRow>
             <SettingsRow
               icon={<Globe className="h-4 w-4" />}
-              label="语言"
-              description="中文（简体）"
+              label="Language"
+              description="English (US)"
               onClick={() => {}}
             >
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </SettingsRow>
             <SettingsRow
               icon={<Shield className="h-4 w-4" />}
-              label="隐私与安全"
+              label="Privacy & security"
               onClick={() => {}}
             >
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -133,15 +129,14 @@ export function SettingsPage({
 
         <Separator />
 
-        {/* Account */}
         <section className="space-y-1">
           <h3 className="px-1 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-            账号
+            Account
           </h3>
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <SettingsRow
               icon={<User className="h-4 w-4" />}
-              label="个人资料"
+              label="Profile"
               onClick={() => {}}
             >
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -155,12 +150,10 @@ export function SettingsPage({
           onClick={onLogout}
         >
           <LogOut className="h-4 w-4" />
-          退出登录
+          Sign out
         </Button>
 
-        <p className="pb-2 text-center text-xs text-muted-foreground">
-          FastDoc v1.0.0
-        </p>
+        <p className="pb-2 text-center text-xs text-muted-foreground">FastDoc v1.0.0</p>
       </div>
     </ScrollArea>
   )

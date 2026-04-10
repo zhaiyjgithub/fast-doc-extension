@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -9,10 +8,10 @@ import type { Patient } from '@/components/patient/patient-search-sheet'
 
 interface RecentRecord {
   id: string
-  type: '录音' | '笔记' | 'EMR'
+  type: 'Recording' | 'Note' | 'EMR'
   title: string
   time: string
-  status: '完成' | '草稿' | '待审'
+  status: 'Complete' | 'Draft' | 'Pending review'
 }
 
 interface HomePageProps {
@@ -22,15 +21,15 @@ interface HomePageProps {
 }
 
 const MOCK_RECORDS: RecentRecord[] = [
-  { id: '1', type: '录音', title: '问诊录音 — 张伟', time: '10分钟前', status: '完成' },
-  { id: '2', type: '笔记', title: '随访记录 — 李娜', time: '1小时前', status: '草稿' },
-  { id: '3', type: 'EMR', title: '入院评估 — 王芳', time: '昨天', status: '待审' },
+  { id: '1', type: 'Recording', title: 'Visit recording — James Wilson', time: '10 min ago', status: 'Complete' },
+  { id: '2', type: 'Note', title: 'Follow-up — Sarah Chen', time: '1 hour ago', status: 'Draft' },
+  { id: '3', type: 'EMR', title: 'Admission note — Emily Rodriguez', time: 'Yesterday', status: 'Pending review' },
 ]
 
 const STATUS_VARIANT: Record<RecentRecord['status'], 'default' | 'secondary' | 'outline'> = {
-  完成: 'default',
-  草稿: 'secondary',
-  待审: 'outline',
+  Complete: 'default',
+  Draft: 'secondary',
+  'Pending review': 'outline',
 }
 
 export function HomePage({ patient, onChangePatient, onNavigate }: HomePageProps) {
@@ -45,10 +44,9 @@ export function HomePage({ patient, onChangePatient, onNavigate }: HomePageProps
       )}
       <ScrollArea className="flex-1">
         <div className="space-y-5 px-4 py-4">
-          {/* Quick actions */}
           <section className="space-y-2">
             <h2 className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-              快速操作
+              Quick actions
             </h2>
             <div className="grid grid-cols-3 gap-2">
               <button
@@ -58,7 +56,7 @@ export function HomePage({ patient, onChangePatient, onNavigate }: HomePageProps
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
                   <Mic className="h-5 w-5 text-primary" />
                 </div>
-                录音
+                Record
               </button>
               <button
                 onClick={() => onNavigate('notes')}
@@ -67,7 +65,7 @@ export function HomePage({ patient, onChangePatient, onNavigate }: HomePageProps
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
                   <FileText className="h-5 w-5 text-primary" />
                 </div>
-                笔记
+                Notes
               </button>
               <button
                 onClick={() => onNavigate('emr')}
@@ -81,10 +79,9 @@ export function HomePage({ patient, onChangePatient, onNavigate }: HomePageProps
             </div>
           </section>
 
-          {/* Recent records */}
           <section className="space-y-2">
             <h2 className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-              最近记录
+              Recent activity
             </h2>
             <div className="space-y-2">
               {MOCK_RECORDS.map((record) => (

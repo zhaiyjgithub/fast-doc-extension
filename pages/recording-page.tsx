@@ -9,16 +9,36 @@ type RecordingState = 'idle' | 'recording' | 'paused' | 'done'
 
 interface Transcript {
   id: string
-  speaker: '医生' | '患者'
+  speaker: 'Clinician' | 'Patient'
   text: string
   time: string
 }
 
 const MOCK_TRANSCRIPT: Transcript[] = [
-  { id: '1', speaker: '医生', text: '您好，请说说您的主要不适。', time: '00:05' },
-  { id: '2', speaker: '患者', text: '我头痛了三天，昨天开始发烧，最高38度5。', time: '00:10' },
-  { id: '3', speaker: '医生', text: '有没有咳嗽、流鼻涕或咽痛？', time: '00:18' },
-  { id: '4', speaker: '患者', text: '没有咳嗽，就是头痛很厉害，特别是额头这里。', time: '00:25' },
+  {
+    id: '1',
+    speaker: 'Clinician',
+    text: 'Hello—please tell me about your main concern today.',
+    time: '00:05',
+  },
+  {
+    id: '2',
+    speaker: 'Patient',
+    text: "I've had a headache for three days. I started running a fever yesterday—about 101°F.",
+    time: '00:10',
+  },
+  {
+    id: '3',
+    speaker: 'Clinician',
+    text: 'Any cough, runny nose, or sore throat?',
+    time: '00:18',
+  },
+  {
+    id: '4',
+    speaker: 'Patient',
+    text: 'No cough. The headache is really bad, especially across my forehead.',
+    time: '00:25',
+  },
 ]
 
 function formatDuration(seconds: number) {
@@ -40,7 +60,6 @@ export function RecordingPage({ patientId: _patientId }: RecordingPageProps) {
   React.useEffect(() => {
     if (state === 'recording') {
       timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000)
-      // Simulate transcript lines appearing
       const t1 = setTimeout(() => setTranscript(MOCK_TRANSCRIPT.slice(0, 1)), 1500)
       const t2 = setTimeout(() => setTranscript(MOCK_TRANSCRIPT.slice(0, 2)), 3000)
       const t3 = setTimeout(() => setTranscript(MOCK_TRANSCRIPT.slice(0, 3)), 5000)
@@ -79,19 +98,17 @@ export function RecordingPage({ patientId: _patientId }: RecordingPageProps) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Recording control zone */}
       <div className="flex shrink-0 flex-col items-center gap-4 border-b border-border px-4 py-6">
-        {/* Pulsing mic indicator */}
         <div
           className={cn(
             'flex h-20 w-20 items-center justify-center rounded-full transition-all',
             state === 'recording'
               ? 'animate-pulse bg-destructive/10 text-destructive'
               : state === 'paused'
-              ? 'bg-warning/10 text-warning'
-              : state === 'done'
-              ? 'bg-primary/10 text-primary'
-              : 'bg-muted text-muted-foreground',
+                ? 'bg-warning/10 text-warning'
+                : state === 'done'
+                  ? 'bg-primary/10 text-primary'
+                  : 'bg-muted text-muted-foreground',
           )}
         >
           {state === 'recording' ? (
@@ -105,43 +122,44 @@ export function RecordingPage({ patientId: _patientId }: RecordingPageProps) {
           )}
         </div>
 
-        {/* Timer */}
         <span className="font-mono text-2xl font-semibold tabular-nums">
           {formatDuration(duration)}
         </span>
 
-        {/* State badge */}
         {state !== 'idle' && (
           <Badge
             variant={
               state === 'recording'
                 ? 'destructive'
                 : state === 'paused'
-                ? 'outline'
-                : 'default'
+                  ? 'outline'
+                  : 'default'
             }
           >
-            {state === 'recording' ? '录音中' : state === 'paused' ? '已暂停' : '已完成'}
+            {state === 'recording'
+              ? 'Recording'
+              : state === 'paused'
+                ? 'Paused'
+                : 'Complete'}
           </Badge>
         )}
 
-        {/* Controls */}
         <div className="flex gap-3">
           {state === 'idle' && (
             <Button onClick={handleStart} size="lg">
               <Mic className="mr-2 h-4 w-4" />
-              开始录音
+              Start recording
             </Button>
           )}
           {state === 'recording' && (
             <>
               <Button variant="outline" onClick={handlePause}>
                 <Pause className="mr-2 h-4 w-4" />
-                暂停
+                Pause
               </Button>
               <Button variant="destructive" onClick={handleStop}>
                 <Square className="mr-2 h-4 w-4" />
-                停止
+                Stop
               </Button>
             </>
           )}
@@ -149,27 +167,35 @@ export function RecordingPage({ patientId: _patientId }: RecordingPageProps) {
             <>
               <Button onClick={handleResume}>
                 <Play className="mr-2 h-4 w-4" />
-                继续
+                Resume
               </Button>
               <Button variant="destructive" onClick={handleStop}>
                 <Square className="mr-2 h-4 w-4" />
-                停止
+                Stop
               </Button>
             </>
           )}
           {state === 'done' && (
-            <Button variant="outline" onClick={() => { setState('idle'); setDuration(0); setTranscript([]) }}>
-              重新录音
+            <Button
+              variant="outline"
+              onClick={() => {
+                setState('idle')
+                setDuration(0)
+                setTranscript([])
+              }}
+            >
+              Record again
             </Button>
           )}
         </div>
       </div>
 
-      {/* Transcript */}
       <div className="flex-1 overflow-hidden">
         {transcript.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {state === 'idle' ? '点击开始录音后将显示转录内容' : '等待转录…'}
+            {state === 'idle'
+              ? 'Transcript will appear after you start recording'
+              : 'Waiting for transcript…'}
           </div>
         ) : (
           <ScrollArea className="h-full">
@@ -179,13 +205,15 @@ export function RecordingPage({ patientId: _patientId }: RecordingPageProps) {
                   key={line.id}
                   className={cn(
                     'flex gap-2',
-                    line.speaker === '医生' ? 'justify-start' : 'justify-end flex-row-reverse',
+                    line.speaker === 'Clinician'
+                      ? 'justify-start'
+                      : 'justify-end flex-row-reverse',
                   )}
                 >
                   <div
                     className={cn(
                       'max-w-[80%] rounded-2xl px-3 py-2 text-sm',
-                      line.speaker === '医生'
+                      line.speaker === 'Clinician'
                         ? 'rounded-tl-sm bg-muted'
                         : 'rounded-tr-sm bg-primary/10',
                     )}

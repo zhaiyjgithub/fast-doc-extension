@@ -14,7 +14,7 @@ export interface Patient {
   id: string
   name: string
   dob: string
-  gender?: '男' | '女' | '其他'
+  gender?: 'Male' | 'Female' | 'Other'
   idNumber?: string
 }
 
@@ -25,11 +25,11 @@ interface PatientSearchSheetProps {
 }
 
 const MOCK_PATIENTS: Patient[] = [
-  { id: '1', name: '张伟', dob: '1985-03-12', gender: '男', idNumber: '110101198503120000' },
-  { id: '2', name: '李娜', dob: '1992-07-25', gender: '女', idNumber: '310101199207250000' },
-  { id: '3', name: '王芳', dob: '1978-11-03', gender: '女', idNumber: '440101197811030000' },
-  { id: '4', name: '赵磊', dob: '2001-01-18', gender: '男', idNumber: '110101200101180000' },
-  { id: '5', name: '陈静', dob: '1965-09-30', gender: '女', idNumber: '320101196509300000' },
+  { id: '1', name: 'James Wilson', dob: '1985-03-12', gender: 'Male', idNumber: 'MRN-100842' },
+  { id: '2', name: 'Sarah Chen', dob: '1992-07-25', gender: 'Female', idNumber: 'MRN-100903' },
+  { id: '3', name: 'Emily Rodriguez', dob: '1978-11-03', gender: 'Female', idNumber: 'MRN-100721' },
+  { id: '4', name: 'Michael Torres', dob: '2001-01-18', gender: 'Male', idNumber: 'MRN-101012' },
+  { id: '5', name: 'Lisa Park', dob: '1965-09-30', gender: 'Female', idNumber: 'MRN-100655' },
 ]
 
 export function PatientSearchSheet({
@@ -50,13 +50,13 @@ export function PatientSearchSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="h-[70vh] rounded-t-2xl p-0">
         <SheetHeader className="border-b border-border px-4 py-3">
-          <SheetTitle>选择患者</SheetTitle>
+          <SheetTitle>Select patient</SheetTitle>
         </SheetHeader>
         <div className="px-4 py-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="搜索姓名或身份证号"
+              placeholder="Search by name or MRN"
               className="pl-9"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -92,7 +92,7 @@ export function PatientSearchSheet({
                 ))}
             {!isLoading && filtered.length === 0 && (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                未找到患者
+                No patients found
               </p>
             )}
           </div>

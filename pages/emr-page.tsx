@@ -14,21 +14,45 @@ interface EMRField {
 }
 
 const INITIAL_EMR: EMRField[] = [
-  { key: 'chiefComplaint', label: '主诉', value: '' },
-  { key: 'presentIllness', label: '现病史', value: '' },
-  { key: 'pastHistory', label: '既往史', value: '' },
-  { key: 'physicalExam', label: '体格检查', value: '' },
-  { key: 'diagnosis', label: '诊断', value: '' },
-  { key: 'treatment', label: '处理意见', value: '' },
+  { key: 'chiefComplaint', label: 'Chief complaint', value: '' },
+  { key: 'presentIllness', label: 'History of present illness', value: '' },
+  { key: 'pastHistory', label: 'Past medical history', value: '' },
+  { key: 'physicalExam', label: 'Physical examination', value: '' },
+  { key: 'diagnosis', label: 'Diagnosis', value: '' },
+  { key: 'treatment', label: 'Plan / treatment', value: '' },
 ]
 
 const AI_GENERATED: EMRField[] = [
-  { key: 'chiefComplaint', label: '主诉', value: '头痛、发热3天' },
-  { key: 'presentIllness', label: '现病史', value: '患者3天前无明显诱因出现头痛，以额部为主，呈持续性胀痛，伴发热，体温最高38.5°C，无畏寒、寒战，无咳嗽、流涕，无恶心、呕吐，自服布洛芬后体温可暂时下降。' },
-  { key: 'pastHistory', label: '既往史', value: '高血压病史5年，规律服药，控制良好。否认糖尿病、冠心病等其他慢性病史。' },
-  { key: 'physicalExam', label: '体格检查', value: '体温38.2°C，血压135/85mmHg，心率88次/分，呼吸18次/分。神志清楚，咽部轻度充血，扁桃体无肿大，双肺呼吸音清，心律齐，腹软无压痛。' },
-  { key: 'diagnosis', label: '诊断', value: '1. 上呼吸道感染\n2. 高血压病（1级，低危）' },
-  { key: 'treatment', label: '处理意见', value: '1. 对乙酰氨基酚0.5g 口服 必要时（发热时）\n2. 多饮水，注意休息\n3. 监测血压，继续原降压方案\n4. 3天后随访，如症状加重随时就诊' },
+  { key: 'chiefComplaint', label: 'Chief complaint', value: 'Headache and fever for 3 days' },
+  {
+    key: 'presentIllness',
+    label: 'History of present illness',
+    value:
+      'Three days ago the patient developed headache, predominantly frontal, constant and throbbing, with fever up to 38.5°C. No chills or rigors, no cough or rhinorrhea, no nausea or vomiting. Ibuprofen temporarily reduced temperature.',
+  },
+  {
+    key: 'pastHistory',
+    label: 'Past medical history',
+    value:
+      'Hypertension for 5 years, on medication with good control. Denies diabetes, coronary disease, or other chronic conditions.',
+  },
+  {
+    key: 'physicalExam',
+    label: 'Physical examination',
+    value:
+      'T 38.2°C, BP 135/85 mmHg, HR 88, RR 18. Alert and oriented. Mild pharyngeal erythema; tonsils not enlarged. Lungs clear bilaterally. Regular cardiac rhythm. Abdomen soft, non-tender.',
+  },
+  {
+    key: 'diagnosis',
+    label: 'Diagnosis',
+    value: '1. Upper respiratory infection\n2. Hypertension, stage 1, low risk',
+  },
+  {
+    key: 'treatment',
+    label: 'Plan / treatment',
+    value:
+      '1. Acetaminophen 500 mg PO PRN for fever\n2. Increase fluid intake and rest\n3. Continue current antihypertensive regimen; monitor BP\n4. Follow up in 3 days; seek care sooner if symptoms worsen',
+  },
 ]
 
 interface EMRPageProps {
@@ -53,9 +77,7 @@ export function EMRPage({ patientId: _patientId }: EMRPageProps) {
   }
 
   function handleFieldChange(key: string, value: string) {
-    setFields((prev) =>
-      prev.map((f) => (f.key === key ? { ...f, value } : f)),
-    )
+    setFields((prev) => prev.map((f) => (f.key === key ? { ...f, value } : f)))
   }
 
   async function handleCopy(key: string, value: string) {
@@ -69,8 +91,8 @@ export function EMRPage({ patientId: _patientId }: EMRPageProps) {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col">
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
           <TabsList>
-            <TabsTrigger value="edit">编辑</TabsTrigger>
-            <TabsTrigger value="preview">预览</TabsTrigger>
+            <TabsTrigger value="edit">Edit</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
           <Button
             size="sm"
@@ -79,7 +101,7 @@ export function EMRPage({ patientId: _patientId }: EMRPageProps) {
             className="gap-1.5"
           >
             <Wand2 className="h-3.5 w-3.5" />
-            {isGenerating ? 'AI生成中…' : 'AI生成'}
+            {isGenerating ? 'Generating…' : 'AI generate'}
           </Button>
         </div>
 
@@ -109,14 +131,14 @@ export function EMRPage({ patientId: _patientId }: EMRPageProps) {
                             ) : (
                               <Copy className="h-3 w-3" />
                             )}
-                            {copiedKey === field.key ? '已复制' : '复制'}
+                            {copiedKey === field.key ? 'Copied' : 'Copy'}
                           </button>
                         )}
                       </div>
                       <Textarea
                         value={field.value}
                         onChange={(e) => handleFieldChange(field.key, e.target.value)}
-                        placeholder={`请输入${field.label}…`}
+                        placeholder={`Enter ${field.label.toLowerCase()}…`}
                         className="min-h-[80px] resize-none"
                       />
                     </div>
@@ -130,7 +152,7 @@ export function EMRPage({ patientId: _patientId }: EMRPageProps) {
             <div className="space-y-3 px-4 py-3">
               {!hasGenerated && (
                 <p className="py-8 text-center text-sm text-muted-foreground">
-                  点击「AI生成」自动填写病历
+                  {'Tap "AI generate" to auto-fill the note'}
                 </p>
               )}
               {fields

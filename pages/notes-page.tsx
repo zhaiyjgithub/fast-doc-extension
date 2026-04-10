@@ -11,7 +11,7 @@ interface Note {
   id: string
   content: string
   createdAt: Date
-  type: '主诉' | '病史' | '查体' | '诊断' | '医嘱'
+  type: 'Chief complaint' | 'History' | 'Physical exam' | 'Diagnosis' | 'Orders'
 }
 
 interface NotesPageProps {
@@ -21,24 +21,32 @@ interface NotesPageProps {
 const MOCK_NOTES: Note[] = [
   {
     id: '1',
-    content: '患者主诉头痛、发热3天，体温最高38.5°C，无咳嗽。',
+    content:
+      'Patient reports headache and fever for 3 days, max temperature 38.5°C, no cough.',
     createdAt: new Date(Date.now() - 1000 * 60 * 30),
-    type: '主诉',
+    type: 'Chief complaint',
   },
   {
     id: '2',
-    content: '既往高血压病史5年，规律服用氨氯地平5mg，血压控制良好。',
+    content:
+      'History of hypertension for 5 years, on amlodipine 5 mg daily, well controlled.',
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
-    type: '病史',
+    type: 'History',
   },
 ]
 
-const NOTE_TYPES: Note['type'][] = ['主诉', '病史', '查体', '诊断', '医嘱']
+const NOTE_TYPES: Note['type'][] = [
+  'Chief complaint',
+  'History',
+  'Physical exam',
+  'Diagnosis',
+  'Orders',
+]
 
 export function NotesPage({ patientId: _patientId }: NotesPageProps) {
   const [notes, setNotes] = React.useState<Note[]>(MOCK_NOTES)
   const [draft, setDraft] = React.useState('')
-  const [draftType, setDraftType] = React.useState<Note['type']>('主诉')
+  const [draftType, setDraftType] = React.useState<Note['type']>('Chief complaint')
   const [activeTab, setActiveTab] = React.useState('list')
 
   function handleAddNote() {
@@ -58,8 +66,8 @@ export function NotesPage({ patientId: _patientId }: NotesPageProps) {
     <div className="flex h-full flex-col">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col">
         <TabsList className="shrink-0 px-4">
-          <TabsTrigger value="list">笔记列表</TabsTrigger>
-          <TabsTrigger value="new">新建笔记</TabsTrigger>
+          <TabsTrigger value="list">All notes</TabsTrigger>
+          <TabsTrigger value="new">New note</TabsTrigger>
         </TabsList>
 
         <TabsContent value="list" className="flex-1 overflow-hidden">
@@ -68,7 +76,7 @@ export function NotesPage({ patientId: _patientId }: NotesPageProps) {
               {notes.length === 0 && (
                 <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
                   <FileText className="h-8 w-8" />
-                  <p className="text-sm">暂无笔记</p>
+                  <p className="text-sm">No notes yet</p>
                 </div>
               )}
               {notes.map((note) => (
@@ -107,14 +115,14 @@ export function NotesPage({ patientId: _patientId }: NotesPageProps) {
               ))}
             </div>
             <Textarea
-              placeholder="输入笔记内容…"
+              placeholder="Enter note content…"
               className="flex-1 resize-none"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
             />
             <Button onClick={handleAddNote} disabled={!draft.trim()} className="w-full">
               <Plus className="mr-2 h-4 w-4" />
-              添加笔记
+              Add note
             </Button>
           </div>
         </TabsContent>

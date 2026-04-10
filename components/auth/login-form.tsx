@@ -22,15 +22,15 @@ export function LoginForm({ onLogin, isLoading = false }: LoginFormProps) {
       <div className="w-full max-w-sm space-y-6">
         <div className="space-y-1 text-center">
           <h1 className="text-2xl font-bold tracking-tight">FastDoc</h1>
-          <p className="text-sm text-muted-foreground">医疗文档助手</p>
+          <p className="text-sm text-muted-foreground">Medical documentation assistant</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="username">用户名</Label>
+            <Label htmlFor="username">Username</Label>
             <Input
               id="username"
               type="text"
-              placeholder="请输入用户名"
+              placeholder="Enter your username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
@@ -38,11 +38,11 @@ export function LoginForm({ onLogin, isLoading = false }: LoginFormProps) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="password">密码</Label>
+            <Label htmlFor="password">Password</Label>
             <Input
               id="password"
               type="password"
-              placeholder="请输入密码"
+              placeholder="Enter your password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -50,7 +50,7 @@ export function LoginForm({ onLogin, isLoading = false }: LoginFormProps) {
             />
           </div>
           <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? '登录中…' : '登录'}
+            {isLoading ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
       </div>
