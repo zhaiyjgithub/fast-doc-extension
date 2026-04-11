@@ -92,3 +92,20 @@
     @apply bg-background text-foreground font-mono antialiased;
   }
 }
+
+/* Sonner: success check uses fill="currentColor" — inherit was foreground (near black). */
+@layer components {
+  [data-sonner-toast][data-type='success'] [data-icon] {
+    @apply text-emerald-600;
+  }
+  .dark [data-sonner-toast][data-type='success'] [data-icon] {
+    @apply text-emerald-400;
+  }
+
+  [data-sonner-toast][data-type='warning'] [data-icon] {
+    @apply text-amber-600;
+  }
+  .dark [data-sonner-toast][data-type='warning'] [data-icon] {
+    @apply text-amber-400;
+  }
+}

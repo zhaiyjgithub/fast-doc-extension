@@ -15,8 +15,8 @@ const inputShellClass =
   'h-auto border-0 bg-muted py-4 pl-12 pr-4 text-base shadow-none transition-all placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring'
 
 export function LoginForm({ onLogin, isLoading = false }: LoginFormProps) {
-  const [username, setUsername] = React.useState('')
-  const [password, setPassword] = React.useState('')
+  const [username, setUsername] = React.useState('schen@emr.local')
+  const [password, setPassword] = React.useState('Doctor@2026!')
   const [showPassword, setShowPassword] = React.useState(false)
 
   function handleSubmit(e: React.FormEvent) {

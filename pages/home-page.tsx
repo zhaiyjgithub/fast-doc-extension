@@ -1,10 +1,13 @@
 import * as React from 'react'
 import { format } from 'date-fns'
+import { EncounterCodeBadges } from '@/components/encounter-code-badges'
 import { PatientBanner } from '@/components/layout/patient-banner'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Zap, Bell, Mic, Search, FileText } from 'lucide-react'
+import { Zap, Bell, Mic, Search, UserRoundSearch } from 'lucide-react'
 import { toast } from 'sonner'
+import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
+import { formatEncounterDob, MOCK_ENCOUNTERS } from '@/lib/mock-encounters'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
 
@@ -12,54 +15,10 @@ interface HomePageProps {
   patient: Patient | null
   username?: string
   onChangePatient: () => void
-  onNavigate: (page: 'recording' | 'notes') => void
+  /** Opens patient sheet in match mode (same as Record tab match flow). */
+  onOpenMatchPatientPicker?: () => void
+  onNavigate: (page: 'recording' | 'soap') => void
 }
-
-interface Encounter {
-  id: string
-  initials: string
-  name: string
-  age: number
-  when: string
-  tag: string
-  tagClass: string
-  dotClass: string
-  muted?: boolean
-}
-
-const MOCK_ENCOUNTERS: Encounter[] = [
-  {
-    id: '1',
-    initials: 'RM',
-    name: 'Robert Miller',
-    age: 72,
-    when: 'Today • 09:15 AM',
-    tag: 'Clinic',
-    tagClass: 'bg-secondary text-secondary-foreground',
-    dotClass: 'bg-emerald-500',
-  },
-  {
-    id: '2',
-    initials: 'SJ',
-    name: 'Sarah Jenkins',
-    age: 45,
-    when: 'Today • 08:30 AM',
-    tag: 'Emergency',
-    tagClass: 'bg-primary/25 text-foreground',
-    dotClass: 'bg-amber-500',
-  },
-  {
-    id: '3',
-    initials: 'JW',
-    name: 'James Wilson',
-    age: 29,
-    when: 'Yesterday • 04:45 PM',
-    tag: 'Follow-up',
-    tagClass: 'bg-secondary text-secondary-foreground',
-    dotClass: 'bg-muted-foreground/40',
-    muted: true,
-  },
-]
 
 function greetingForHour(): string {
   const h = new Date().getHours()
@@ -72,6 +31,7 @@ export function HomePage({
   patient,
   username = 'there',
   onChangePatient,
+  onOpenMatchPatientPicker,
   onNavigate,
 }: HomePageProps) {
   const displayName = username.trim() || 'there'
@@ -101,8 +61,8 @@ export function HomePage({
         />
       )}
 
-      <ScrollArea className="min-w-0 flex-1">
-        <div className="min-w-0 space-y-8 px-5 pb-24 pt-6">
+      <ScrollArea className="min-h-0 min-w-0 flex-1">
+        <div className="min-w-0 space-y-6 px-4 pb-24 pt-4">
           <section className="space-y-2">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -123,16 +83,16 @@ export function HomePage({
           </section>
 
           <section className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
               <button
                 type="button"
                 onClick={() => onNavigate('recording')}
-                className="flex h-[140px] flex-col justify-between rounded-lg bg-primary p-5 text-left shadow-sm transition-all hover:brightness-95 active:scale-[0.99]"
+                className="flex min-h-[120px] flex-col justify-between rounded-lg bg-primary p-3 text-left shadow-sm transition-all hover:brightness-95 active:scale-[0.99] sm:min-h-[132px] sm:p-4"
               >
-                <div className="self-start rounded-full bg-white/30 p-2">
-                  <Mic className="size-5 text-primary-foreground" aria-hidden />
+                <div className="self-start rounded-full bg-white/30 p-1.5 sm:p-2">
+                  <Mic className="size-4 text-primary-foreground sm:size-5" aria-hidden />
                 </div>
-                <span className="text-base font-bold leading-tight text-primary-foreground">
+                <span className="text-xs font-bold leading-snug text-primary-foreground sm:text-sm">
                   New recording
                 </span>
               </button>
@@ -140,67 +100,67 @@ export function HomePage({
               <button
                 type="button"
                 onClick={onChangePatient}
-                className="flex h-[140px] flex-col justify-between rounded-lg border border-border/60 bg-card p-5 text-left shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.99]"
+                className="flex min-h-[120px] flex-col justify-between rounded-lg border border-border/60 bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.99] sm:min-h-[132px] sm:p-4"
               >
-                <div className="self-start rounded-full bg-muted p-2">
-                  <Search className="size-5 text-muted-foreground" aria-hidden />
+                <div className="self-start rounded-full bg-muted p-1.5 sm:p-2">
+                  <Search className="size-4 text-muted-foreground sm:size-5" aria-hidden />
                 </div>
-                <span className="text-base font-bold leading-tight text-foreground">
+                <span className="text-xs font-bold leading-snug text-foreground sm:text-sm">
                   Find patient
                 </span>
               </button>
 
               <button
                 type="button"
-                onClick={() => onNavigate('notes')}
-                className="col-span-2 flex h-[140px] flex-col justify-between rounded-lg border border-border/60 bg-card p-5 text-left shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.99]"
+                onClick={() => onOpenMatchPatientPicker?.()}
+                className="flex min-h-[120px] flex-col justify-between rounded-lg border border-emerald-200/90 bg-emerald-50 p-3 text-left shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-100/90 active:scale-[0.99] dark:border-emerald-800/80 dark:bg-emerald-950/45 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/65 sm:min-h-[132px] sm:p-4"
               >
-                <div className="self-start rounded-full bg-muted p-2">
-                  <FileText className="size-5 text-muted-foreground" aria-hidden />
+                <div className="self-start rounded-full bg-emerald-100 p-1.5 dark:bg-emerald-900/55 sm:p-2">
+                  <UserRoundSearch className="size-4 text-emerald-700 dark:text-emerald-300 sm:size-5" aria-hidden />
                 </div>
-                <span className="text-base font-bold leading-tight text-foreground">
-                  Recent notes
+                <span className="text-xs font-bold leading-snug text-emerald-950 dark:text-emerald-50 sm:text-sm">
+                  Match Patient
                 </span>
               </button>
             </div>
           </section>
 
           <section className="space-y-4">
-            <div className="flex items-end justify-between gap-2">
-              <h2 className="text-lg font-bold text-foreground">Recent encounters</h2>
-              <button
-                type="button"
-                onClick={() => onNavigate('notes')}
-                className="shrink-0 text-sm font-semibold text-primary underline-offset-4 hover:underline"
-              >
-                View all
-              </button>
-            </div>
+            <h2 className="text-lg font-bold text-foreground">Recent encounters</h2>
             <div className="space-y-3">
               {MOCK_ENCOUNTERS.map((e) => (
-                <div
+                <button
                   key={e.id}
+                  type="button"
+                  onClick={() => onNavigate('soap')}
                   className={cn(
-                    'flex items-center gap-4 rounded-lg border border-border/60 bg-card p-4 transition-colors hover:bg-muted/40',
+                    'flex w-full items-center gap-4 rounded-lg border border-border/60 bg-card p-4 text-left transition-colors hover:bg-muted/40 active:scale-[0.99]',
                     e.muted && 'opacity-80',
                   )}
+                  aria-label={`Open AI EMR for ${e.name}, DOB ${formatEncounterDob(e.dob)}, ${e.gender}, ${e.when}`}
                 >
                   <Avatar className="size-12 shrink-0 rounded-full">
-                    <AvatarFallback className="text-xs font-semibold">
+                    <AvatarFallback
+                      className={cn('text-xs font-semibold', avatarFallbackClassForName(e.name))}
+                    >
                       {e.initials}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="truncate font-bold text-foreground">
-                        {e.name}, {e.age}
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <h3 className="flex min-w-0 flex-1 items-baseline gap-0 overflow-hidden font-bold text-foreground">
+                        <span className="min-w-0 flex-1 truncate">{e.name}</span>
+                        <span className="shrink-0">, {e.age}</span>
                       </h3>
-                      <span
-                        className={cn('mt-1.5 size-2 shrink-0 rounded-full', e.dotClass)}
-                        aria-hidden
-                      />
+                      <p className="shrink-0 pl-2 text-right text-[11px] font-semibold leading-snug text-muted-foreground whitespace-nowrap">
+                        {e.when}
+                      </p>
                     </div>
-                    <p className="text-xs font-medium text-muted-foreground">{e.when}</p>
+                    <p className="mt-0.5 text-xs font-medium text-muted-foreground">
+                      DOB {formatEncounterDob(e.dob)}
+                      <span className="text-muted-foreground/60"> · </span>
+                      {e.gender}
+                    </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <span
                         className={cn(
@@ -211,8 +171,9 @@ export function HomePage({
                         {e.tag}
                       </span>
                     </div>
+                    <EncounterCodeBadges icdCodes={e.icdCodes} cptCodes={e.cptCodes} />
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </section>

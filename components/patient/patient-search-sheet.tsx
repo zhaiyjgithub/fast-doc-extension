@@ -9,8 +9,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Search, ChevronRight, X, Plus } from 'lucide-react'
-import { toast } from 'sonner'
+import { Search, ChevronRight, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export interface Patient {
@@ -126,7 +125,7 @@ export function PatientSearchSheet({
 
         <div className="relative flex min-h-0 flex-1 flex-col">
           <ScrollArea className="min-h-0 flex-1">
-            <div className="space-y-4 px-6 pb-32">
+            <div className="space-y-4 px-6 pb-8">
               <p className="px-1 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                 Recent searches
               </p>
@@ -184,18 +183,6 @@ export function PatientSearchSheet({
               )}
             </div>
           </ScrollArea>
-
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-linear-to-t from-card via-card to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 p-6">
-            <button
-              type="button"
-              onClick={() => toast.message('Add new patient is not available yet')}
-              className="pointer-events-auto flex w-full items-center justify-center gap-2 rounded-full border-2 border-primary py-4 px-6 font-bold text-primary transition-all hover:bg-primary/5 active:scale-[0.98]"
-            >
-              <Plus className="size-5" aria-hidden />
-              Add new patient
-            </button>
-          </div>
         </div>
       </SheetContent>
     </Sheet>
