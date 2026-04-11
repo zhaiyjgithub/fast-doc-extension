@@ -8,19 +8,17 @@ import type { Patient } from '@/components/patient/patient-search-sheet'
 import { HomePage } from '@/pages/home-page'
 import { NotesPage } from '@/pages/notes-page'
 import { RecordingPage } from '@/pages/recording-page'
-import { EMRPage } from '@/pages/emr-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { Button } from '@/components/ui/button'
-import { Home, FileText, Mic, ClipboardList, Settings, UserPlus } from 'lucide-react'
+import { Home, FileText, Mic, Settings, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 
-type AppPage = 'home' | 'notes' | 'recording' | 'emr' | 'settings'
+type AppPage = 'home' | 'notes' | 'recording' | 'settings'
 
 const NAV_TABS: NavTab[] = [
   { id: 'home', label: 'Home', icon: <Home className="h-5 w-5" /> },
   { id: 'notes', label: 'Notes', icon: <FileText className="h-5 w-5" /> },
   { id: 'recording', label: 'Record', icon: <Mic className="h-5 w-5" /> },
-  { id: 'emr', label: 'EMR', icon: <ClipboardList className="h-5 w-5" /> },
   { id: 'settings', label: 'Settings', icon: <Settings className="h-5 w-5" /> },
 ]
 
@@ -65,7 +63,6 @@ export default function App() {
     home: 'FastDoc',
     notes: 'Notes',
     recording: 'Recording',
-    emr: 'EMR',
     settings: 'Settings',
   }
 
@@ -109,7 +106,6 @@ export default function App() {
         )}
         {currentPage === 'notes' && <NotesPage patientId={patient?.id} />}
         {currentPage === 'recording' && <RecordingPage patientId={patient?.id} />}
-        {currentPage === 'emr' && <EMRPage patientId={patient?.id} />}
         {currentPage === 'settings' && (
           <SettingsPage
             isDark={isDark}

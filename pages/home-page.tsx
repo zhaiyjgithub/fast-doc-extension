@@ -3,14 +3,7 @@ import { format } from 'date-fns'
 import { PatientBanner } from '@/components/layout/patient-banner'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import {
-  Zap,
-  Bell,
-  Mic,
-  Search,
-  FileText,
-  ClipboardList,
-} from 'lucide-react'
+import { Zap, Bell, Mic, Search, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
@@ -19,7 +12,7 @@ interface HomePageProps {
   patient: Patient | null
   username?: string
   onChangePatient: () => void
-  onNavigate: (page: 'recording' | 'notes' | 'emr') => void
+  onNavigate: (page: 'recording' | 'notes') => void
 }
 
 interface Encounter {
@@ -160,7 +153,7 @@ export function HomePage({
               <button
                 type="button"
                 onClick={() => onNavigate('notes')}
-                className="flex h-[140px] flex-col justify-between rounded-lg border border-border/60 bg-card p-5 text-left shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.99]"
+                className="col-span-2 flex h-[140px] flex-col justify-between rounded-lg border border-border/60 bg-card p-5 text-left shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.99]"
               >
                 <div className="self-start rounded-full bg-muted p-2">
                   <FileText className="size-5 text-muted-foreground" aria-hidden />
@@ -168,17 +161,6 @@ export function HomePage({
                 <span className="text-base font-bold leading-tight text-foreground">
                   Recent notes
                 </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('emr')}
-                className="flex h-[140px] flex-col justify-between rounded-lg border border-border/60 bg-card p-5 text-left shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.99]"
-              >
-                <div className="self-start rounded-full bg-muted p-2">
-                  <ClipboardList className="size-5 text-muted-foreground" aria-hidden />
-                </div>
-                <span className="text-base font-bold leading-tight text-foreground">EMR</span>
               </button>
             </div>
           </section>
