@@ -27,6 +27,7 @@ const NAV_TABS: NavTab[] = [
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = React.useState(false)
   const [isLoggingIn, setIsLoggingIn] = React.useState(false)
+  const [loggedInUsername, setLoggedInUsername] = React.useState('')
   const [currentPage, setCurrentPage] = React.useState<AppPage>('home')
   const [patient, setPatient] = React.useState<Patient | null>(null)
   const [patientSheetOpen, setPatientSheetOpen] = React.useState(false)
@@ -40,6 +41,7 @@ export default function App() {
   function handleLogin(username: string, _password: string) {
     setIsLoggingIn(true)
     setTimeout(() => {
+      setLoggedInUsername(username.trim() || 'Doctor')
       setIsLoggedIn(true)
       setIsLoggingIn(false)
       toast.success(`Welcome back, ${username}!`)
@@ -48,6 +50,7 @@ export default function App() {
 
   function handleLogout() {
     setIsLoggedIn(false)
+    setLoggedInUsername('')
     setPatient(null)
     setCurrentPage('home')
     toast.info('Signed out')
@@ -76,27 +79,30 @@ export default function App() {
 
   return (
     <AppShell>
-      <TopBar
-        title={PAGE_TITLES[currentPage]}
-        action={
-          currentPage !== 'settings' && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => setPatientSheetOpen(true)}
-              aria-label="Select patient"
-            >
-              <UserPlus className="h-4 w-4" />
-            </Button>
-          )
-        }
-      />
+      {currentPage !== 'home' && (
+        <TopBar
+          title={PAGE_TITLES[currentPage]}
+          action={
+            currentPage !== 'settings' && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setPatientSheetOpen(true)}
+                aria-label="Select patient"
+              >
+                <UserPlus className="h-4 w-4" />
+              </Button>
+            )
+          }
+        />
+      )}
 
       <div className="flex-1 overflow-hidden">
         {currentPage === 'home' && (
           <HomePage
             patient={patient}
+            username={loggedInUsername}
             onChangePatient={() => setPatientSheetOpen(true)}
             onNavigate={(page) => setCurrentPage(page)}
           />
@@ -109,6 +115,7 @@ export default function App() {
             isDark={isDark}
             onToggleDark={setIsDark}
             onLogout={handleLogout}
+            username={loggedInUsername || undefined}
           />
         )}
       </div>
