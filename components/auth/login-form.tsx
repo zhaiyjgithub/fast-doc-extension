@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { Stethoscope, Mail, Lock, Eye, EyeOff } from 'lucide-react'
+import { Zap, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 
 interface LoginFormProps {
   onLogin: (username: string, password: string) => void
@@ -38,7 +38,7 @@ export function LoginForm({ onLogin, isLoading = false }: LoginFormProps) {
       <main className="relative z-10 flex w-full max-w-[400px] flex-col gap-8">
         <header className="flex flex-col items-center gap-4 text-center">
           <div className="flex size-20 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/25">
-            <Stethoscope className="size-10 text-primary-foreground" aria-hidden />
+            <Zap className="size-10 text-primary-foreground" aria-hidden />
           </div>
           <div className="space-y-1">
             <h1 className="text-3xl font-extrabold tracking-tight text-foreground">
