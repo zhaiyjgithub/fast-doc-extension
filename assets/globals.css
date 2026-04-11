@@ -85,7 +85,10 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    @apply font-mono;
+  }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply bg-background text-foreground font-mono antialiased;
   }
 }
