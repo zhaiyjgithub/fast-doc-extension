@@ -1,6 +1,11 @@
 import * as React from 'react'
 import { differenceInYears, format, parseISO, isValid } from 'date-fns'
 import { useSpeechRecognition } from '@/hooks/use-speech-recognition'
+import {
+  mockLLMAttributeSpeakers,
+  attributedSegmentsToTranscript,
+  type RawSegment,
+} from '@/lib/mock-llm-speaker-attribution'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -384,10 +389,20 @@ export function RecordingPage({
 
   const handleStopRecording = () => {
     speech.stop()
-    const fromLive =
-      liveLines.length > 0
-        ? liveLines.map((l) => `${l.speaker}: ${l.text}`).join('\n\n').trim()
-        : ''
+
+    // Build raw segments from live lines, ignoring the manual toggle speaker labels.
+    // The mock LLM will re-attribute speakers based on linguistic heuristics.
+    const rawSegments: RawSegment[] = liveLines.map((l, i) => ({
+      idx: i,
+      text: l.text,
+      time: l.time,
+    }))
+
+    const attributed = mockLLMAttributeSpeakers(rawSegments)
+    const fromLive = attributed.length > 0
+      ? attributedSegmentsToTranscript(attributed)
+      : ''
+
     if (processingTranscriptTimerRef.current) {
       clearTimeout(processingTranscriptTimerRef.current)
       processingTranscriptTimerRef.current = null
