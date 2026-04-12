@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { differenceInYears, format, parseISO, isValid } from 'date-fns'
+import { useSpeechRecognition } from '@/hooks/use-speech-recognition'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -264,6 +265,20 @@ export function RecordingPage({
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const liveScriptSentinelRef = React.useRef<HTMLDivElement>(null)
   const prevLiveLineCountRef = React.useRef(0)
+  // Refs that hold mutable values read inside speech callback (avoids stale closure)
+  const elapsedTimeRef = React.useRef(0)
+  const activeSpeakerRef = React.useRef<'Doctor' | 'Patient'>('Doctor')
+
+  // ── Speech recognition ────────────────────────────────────────────────────
+  const [activeSpeaker, setActiveSpeaker] = React.useState<'Doctor' | 'Patient'>('Doctor')
+
+  const handleFinalResult = React.useCallback((text: string) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const time = formatTime(elapsedTimeRef.current)
+    setLiveLines((prev) => [...prev, { id, speaker: activeSpeakerRef.current, text, time }])
+  }, [])
+
+  const speech = useSpeechRecognition({ onFinalResult: handleFinalResult, lang: 'en-US' })
 
   const updateRecordingHeaderCompact = React.useCallback(() => {
     const sc = scrollRef.current
@@ -288,6 +303,10 @@ export function RecordingPage({
     }
   }, [state])
 
+  // Keep mutable refs in sync with their state counterparts
+  React.useEffect(() => { elapsedTimeRef.current = elapsedTime }, [elapsedTime])
+  React.useEffect(() => { activeSpeakerRef.current = activeSpeaker }, [activeSpeaker])
+
   React.useEffect(() => {
     return () => {
       if (processingTranscriptTimerRef.current) {
@@ -297,10 +316,29 @@ export function RecordingPage({
     }
   }, [])
 
+  // Start / stop speech recognition when recording state changes
   React.useEffect(() => {
-    if (state !== 'recording') return
-    setLiveLines(liveLinesForElapsed(elapsedTime))
-  }, [elapsedTime, state])
+    if (state === 'recording') {
+      void speech.start()
+    } else {
+      speech.stop()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state])
+
+  // Handle speech recognition errors
+  React.useEffect(() => {
+    if (!speech.error) return
+    if (speech.error === 'microphone-denied') {
+      toast.error('Microphone access denied. Please allow mic access and try again.')
+      setShowManualInput(true)
+      setState('ready')
+    } else if (speech.error === 'not-supported') {
+      toast.error('Speech recognition is not supported in this browser.')
+      setShowManualInput(true)
+      setState('ready')
+    }
+  }, [speech.error])
 
   /** Only when a new live line is appended — not on start/pause/resume alone. */
   React.useEffect(() => {
@@ -345,9 +383,11 @@ export function RecordingPage({
   }, [state])
 
   const handleStopRecording = () => {
-    const lines = liveLinesForElapsed(elapsedTime)
+    speech.stop()
     const fromLive =
-      lines.length > 0 ? lines.map((l) => `${l.speaker}: ${l.text}`).join('\n\n').trim() : ''
+      liveLines.length > 0
+        ? liveLines.map((l) => `${l.speaker}: ${l.text}`).join('\n\n').trim()
+        : ''
     if (processingTranscriptTimerRef.current) {
       clearTimeout(processingTranscriptTimerRef.current)
       processingTranscriptTimerRef.current = null
@@ -357,7 +397,7 @@ export function RecordingPage({
     processingTranscriptTimerRef.current = setTimeout(() => {
       setTranscript(fromLive || DEMO_TRANSCRIPT)
       processingTranscriptTimerRef.current = null
-    }, 1500)
+    }, 400)
   }
 
   const handleCancelGenerateAndResume = () => {
@@ -382,6 +422,8 @@ export function RecordingPage({
       clearTimeout(processingTranscriptTimerRef.current)
       processingTranscriptTimerRef.current = null
     }
+    speech.reset()
+    setActiveSpeaker('Doctor')
     setState('ready')
     setElapsedTime(0)
     setTranscript('')
@@ -389,6 +431,7 @@ export function RecordingPage({
     setShowManualInput(false)
     setCompactRecordingHeader(false)
     prevLiveLineCountRef.current = 0
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function handleRequestDismissPatient() {
@@ -767,12 +810,26 @@ export function RecordingPage({
                 <section className="space-y-3 border-t border-border/50 pt-6">
                   <div className="flex items-center justify-between gap-2 px-0.5">
                     <h3 className="text-sm font-bold text-foreground">Live script</h3>
-                    <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold uppercase text-secondary-foreground">
-                      AI enhanced
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted p-0.5">
+                      {(['Doctor', 'Patient'] as const).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setActiveSpeaker(s)}
+                          className={cn(
+                            'rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase transition-colors',
+                            activeSpeaker === s
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="min-h-[100px] rounded-lg border border-border bg-card p-4 shadow-sm ring-1 ring-border/40">
-                    {liveLines.length === 0 ? (
+                    {liveLines.length === 0 && !speech.interimText ? (
                       <p className="text-center text-xs leading-relaxed text-muted-foreground">
                         {state === 'paused'
                           ? 'Paused — script will continue when you resume.'
@@ -807,6 +864,16 @@ export function RecordingPage({
                             </p>
                           </li>
                         ))}
+                        {speech.interimText && (
+                          <li className="flex flex-col gap-1 opacity-50">
+                            <span className="px-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/80">
+                              {activeSpeaker}
+                            </span>
+                            <p className="text-sm italic leading-relaxed text-muted-foreground">
+                              {speech.interimText}
+                            </p>
+                          </li>
+                        )}
                       </ul>
                     )}
                   </div>
