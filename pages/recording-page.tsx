@@ -477,7 +477,12 @@ export function RecordingPage({
         ref={scrollRef}
         className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
       >
-        <div className="space-y-4 px-4 pb-28 pt-4">
+        <motion.div
+          className="space-y-4 px-4 pb-28 pt-4"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+        >
           {activePatient ? (
             <section
               className={cn(
@@ -859,7 +864,7 @@ export function RecordingPage({
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+        </motion.div>
       </div>
     </div>
   )

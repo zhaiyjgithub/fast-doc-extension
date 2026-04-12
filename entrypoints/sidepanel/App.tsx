@@ -11,11 +11,22 @@ import { RecordingPage } from '@/pages/recording-page'
 import { SoapPage } from '@/pages/soap-page'
 import { SoapGeneratingPage } from '@/pages/soap-generating-page'
 import { SoapSuccessPage } from '@/pages/soap-success-page'
+import { PatientDemographicPage } from '@/pages/patient-demographic-page'
+import { ProviderPage } from '@/pages/provider-page'
 import { SettingsPage } from '@/pages/settings-page'
+import { getProviderProfile } from '@/lib/mock-provider'
+import { getDemographicByEncounterId } from '@/lib/patient-demographic'
 import { Home, FileText, Mic, Settings } from 'lucide-react'
 import { toast } from 'sonner'
 
-type AppPage = 'home' | 'notes' | 'recording' | 'soap' | 'settings'
+type AppPage =
+  | 'home'
+  | 'notes'
+  | 'recording'
+  | 'soap'
+  | 'settings'
+  | 'patient-demographic'
+  | 'provider'
 type SoapFlowPhase = 'idle' | 'generating' | 'success'
 
 const NAV_TABS: NavTab[] = [
@@ -38,6 +49,8 @@ export default function App() {
   const [soapFlowPhase, setSoapFlowPhase] = React.useState<SoapFlowPhase>('idle')
   const soapGenTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const soapSuccessTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [patientDemoEncounterId, setPatientDemoEncounterId] = React.useState<string | null>(null)
+  const [patientDemoReturnTab, setPatientDemoReturnTab] = React.useState<'home' | 'notes'>('home')
 
   function clearSoapFlowTimers() {
     if (soapGenTimerRef.current) {
@@ -68,7 +81,27 @@ export default function App() {
   function handleNavChange(id: AppPage) {
     clearSoapFlowTimers()
     setSoapFlowPhase('idle')
+    setPatientDemoEncounterId(null)
     setCurrentPage(id)
+  }
+
+  function openPatientDemographic(from: 'home' | 'notes', encounterId: string) {
+    setPatientDemoReturnTab(from)
+    setPatientDemoEncounterId(encounterId)
+    setCurrentPage('patient-demographic')
+  }
+
+  function closePatientDemographic() {
+    setPatientDemoEncounterId(null)
+    setCurrentPage(patientDemoReturnTab)
+  }
+
+  function openProviderPage() {
+    setCurrentPage('provider')
+  }
+
+  function closeProviderPage() {
+    setCurrentPage('settings')
   }
 
   React.useEffect(() => () => clearSoapFlowTimers(), [])
@@ -91,6 +124,7 @@ export default function App() {
   function handleLogout() {
     clearSoapFlowTimers()
     setSoapFlowPhase('idle')
+    setPatientDemoEncounterId(null)
     setIsLoggedIn(false)
     setLoggedInUsername('')
     setPatient(null)
@@ -129,7 +163,12 @@ export default function App() {
     recording: 'Recording',
     soap: 'AI EMR',
     settings: 'Settings',
+    'patient-demographic': 'Patient demographics',
+    provider: 'Provider',
   }
+
+  const patientDemographicPayload =
+    patientDemoEncounterId != null ? getDemographicByEncounterId(patientDemoEncounterId) : null
 
   if (!isLoggedIn) {
     return (
@@ -148,6 +187,13 @@ export default function App() {
               ? 'Generating…'
               : PAGE_TITLES[currentPage]
           }
+          onBack={
+            currentPage === 'patient-demographic'
+              ? closePatientDemographic
+              : currentPage === 'provider'
+                ? closeProviderPage
+                : undefined
+          }
         />
       )}
 
@@ -157,12 +203,18 @@ export default function App() {
             patient={patient}
             username={loggedInUsername}
             onChangePatient={() => openPatientSheet('select')}
+            onClearSelectedPatient={() => setPatient(null)}
             onOpenMatchPatientPicker={() => openPatientSheet('match')}
             onNavigate={(page) => handleNavChange(page)}
+            onOpenEncounterPatient={(id) => openPatientDemographic('home', id)}
           />
         )}
         {currentPage === 'notes' && (
-          <NotesPage patientId={patient?.id} onOpenEncounter={() => handleNavChange('soap')} />
+          <NotesPage
+            patientId={patient?.id}
+            onOpenEncounter={() => handleNavChange('soap')}
+            onOpenEncounterPatient={(id) => openPatientDemographic('notes', id)}
+          />
         )}
         {currentPage === 'recording' && (
           <RecordingPage
@@ -185,13 +237,26 @@ export default function App() {
             onToggleDark={setIsDark}
             onLogout={handleLogout}
             username={loggedInUsername || undefined}
+            onOpenProvider={openProviderPage}
           />
+        )}
+        {currentPage === 'provider' && (
+          <ProviderPage provider={getProviderProfile(loggedInUsername)} />
+        )}
+        {currentPage === 'patient-demographic' && patientDemographicPayload && (
+          <PatientDemographicPage demographic={patientDemographicPayload} />
         )}
       </div>
 
       <BottomNav
         tabs={NAV_TABS}
-        value={currentPage}
+        value={
+          currentPage === 'patient-demographic'
+            ? patientDemoReturnTab
+            : currentPage === 'provider'
+              ? 'settings'
+              : currentPage
+        }
         onChange={(id) => handleNavChange(id as AppPage)}
       />
 

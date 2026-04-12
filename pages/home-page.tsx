@@ -1,88 +1,179 @@
 import * as React from 'react'
-import { format } from 'date-fns'
 import { EncounterCodeBadges } from '@/components/encounter-code-badges'
 import { PatientBanner } from '@/components/layout/patient-banner'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Zap, Bell, Mic, Search, UserRoundSearch } from 'lucide-react'
+import { Bell, Mic, Search, UserRoundSearch } from 'lucide-react'
+import { motion, type Variants } from 'motion/react'
 import { toast } from 'sonner'
 import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
 import { formatEncounterDob, MOCK_ENCOUNTERS } from '@/lib/mock-encounters'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
 
+const homePageListVariants: Variants = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: 0.055, delayChildren: 0.04 },
+  },
+}
+
+const homePageItemVariants: Variants = {
+  hidden: { opacity: 0, y: 14 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] },
+  },
+}
+
 interface HomePageProps {
   patient: Patient | null
+  /** Login id (e.g. email); used to derive "Dr. …" when `doctorDisplayName` is omitted. */
   username?: string
+  /** Explicit provider name for the header (e.g. "Jane Smith" → shown as "Dr. Jane Smith"). */
+  doctorDisplayName?: string
+  /** Specialty badge below the navbar (e.g. Primary care). */
+  providerSpecialty?: string
+  /** Site / EHR badge below the navbar (e.g. iClinic). */
+  clinicSiteLabel?: string
+  /** Opens the patient search sheet (e.g. Find patient). */
   onChangePatient: () => void
+  /** Clears the toolbar-selected patient without opening the sheet (banner close). */
+  onClearSelectedPatient: () => void
   /** Opens patient sheet in match mode (same as Record tab match flow). */
   onOpenMatchPatientPicker?: () => void
   onNavigate: (page: 'recording' | 'soap') => void
+  /** Opens patient demographics for an encounter (name row). */
+  onOpenEncounterPatient?: (encounterId: string) => void
 }
 
-function greetingForHour(): string {
-  const h = new Date().getHours()
-  if (h < 12) return 'Good morning'
-  if (h < 18) return 'Good afternoon'
-  return 'Good evening'
+function doctorHeaderLabel(username: string, explicit?: string): string {
+  const normalizeDr = (s: string) => {
+    const rest = s.replace(/^dr\.?\s*/i, '').trim()
+    return rest ? `Dr. ${rest}` : 'Dr. User'
+  }
+  const e = explicit?.trim()
+  if (e) {
+    if (/^dr\.?/i.test(e)) return normalizeDr(e)
+    return `Dr. ${e}`
+  }
+  const t = username.trim()
+  if (!t) return 'Dr. User'
+  if (/^dr\.?/i.test(t)) return normalizeDr(t)
+  if (t.includes('@')) {
+    const local = (t.split('@')[0] ?? '').replace(/[._-]+/g, ' ')
+    const words = local.trim().split(/\s+/).filter(Boolean)
+    const pretty = words
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ')
+    return pretty ? `Dr. ${pretty}` : 'Dr. User'
+  }
+  const cap = t.charAt(0).toUpperCase() + t.slice(1)
+  return `Dr. ${cap}`
+}
+
+function nameForAvatarColor(doctorLabel: string): string {
+  return doctorLabel.replace(/^dr\.?\s+/i, '').trim() || doctorLabel
+}
+
+function initialsForDoctor(doctorLabel: string): string {
+  const seed = nameForAvatarColor(doctorLabel)
+  const parts = seed.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase()
+  }
+  if (parts[0] && parts[0].length >= 2) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0]?.charAt(0) ?? '?').toUpperCase()
 }
 
 export function HomePage({
   patient,
-  username = 'there',
+  username = '',
+  doctorDisplayName: doctorDisplayNameProp,
+  providerSpecialty = 'Primary care',
+  clinicSiteLabel = 'iClinic',
   onChangePatient,
+  onClearSelectedPatient,
   onOpenMatchPatientPicker,
   onNavigate,
+  onOpenEncounterPatient,
 }: HomePageProps) {
-  const displayName = username.trim() || 'there'
+  const doctorLabel = doctorHeaderLabel(username, doctorDisplayNameProp)
+  const avatarColorSeed = nameForAvatarColor(doctorLabel)
+  const doctorInitials = initialsForDoctor(doctorLabel)
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
-      <header className="sticky top-0 z-40 flex h-12 w-full shrink-0 items-center justify-between border-b border-border/60 bg-background/80 px-4 backdrop-blur-md">
-        <div className="flex cursor-pointer items-center gap-2 text-primary active:scale-95">
-          <Zap className="size-5" aria-hidden />
-          <span className="text-lg font-bold tracking-tight text-foreground">FastDoc</span>
+      <motion.header
+        className="sticky top-0 z-40 shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-md"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+      >
+        <div className="flex h-12 w-full items-center justify-between gap-3 px-4">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Avatar className="size-9 shrink-0 rounded-full">
+              <AvatarFallback
+                className={cn('text-xs font-semibold', avatarFallbackClassForName(avatarColorSeed))}
+              >
+                {doctorInitials}
+              </AvatarFallback>
+            </Avatar>
+            <span className="min-w-0 truncate text-base font-bold tracking-tight text-foreground">
+              {doctorLabel}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => toast.message('No new notifications')}
+            className="shrink-0 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground active:scale-95"
+            aria-label="Notifications"
+          >
+            <Bell className="size-5" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => toast.message('No new notifications')}
-          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground active:scale-95"
-          aria-label="Notifications"
-        >
-          <Bell className="size-5" />
-        </button>
-      </header>
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2">
+          <span
+            className={cn(
+              'shrink-0 rounded-full border border-border/70 bg-muted/40 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-foreground/90',
+            )}
+          >
+            {clinicSiteLabel}
+          </span>
+          <span
+            className={cn(
+              'shrink-0 rounded-full bg-primary/30 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-foreground',
+            )}
+          >
+            {providerSpecialty}
+          </span>
+        </div>
+      </motion.header>
 
       {patient && (
-        <PatientBanner
-          name={patient.name}
-          dob={patient.dob}
-          onDismiss={onChangePatient}
-        />
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
+        >
+          <PatientBanner
+            name={patient.name}
+            dob={patient.dob}
+            gender={patient.gender}
+            onDismiss={onClearSelectedPatient}
+          />
+        </motion.div>
       )}
 
       <ScrollArea className="min-h-0 min-w-0 flex-1">
-        <div className="min-w-0 space-y-6 px-4 pb-24 pt-4">
-          <section className="space-y-2">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
-                  {greetingForHour()}, {displayName}{' '}
-                  <span aria-hidden>👋</span>
-                </h1>
-                <p className="mt-0.5 text-sm font-medium text-muted-foreground">
-                  {format(new Date(), 'EEEE, MMM d')}
-                </p>
-              </div>
-              <div className="shrink-0 rounded-full bg-primary/30 px-3 py-1">
-                <span className="text-[11px] font-bold uppercase tracking-wide text-foreground">
-                  Primary care
-                </span>
-              </div>
-            </div>
-          </section>
-
-          <section className="space-y-4">
+        <motion.div
+          className="min-w-0 space-y-6 px-4 pb-24 pt-4"
+          variants={homePageListVariants}
+          initial="hidden"
+          animate="show"
+        >
+          <motion.section variants={homePageItemVariants} className="space-y-4">
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
               <button
                 type="button"
@@ -123,21 +214,20 @@ export function HomePage({
                 </span>
               </button>
             </div>
-          </section>
+          </motion.section>
 
-          <section className="space-y-4">
+          <motion.section variants={homePageItemVariants} className="space-y-4">
             <h2 className="text-lg font-bold text-foreground">Recent encounters</h2>
             <div className="space-y-3">
               {MOCK_ENCOUNTERS.map((e) => (
-                <button
+                <div
                   key={e.id}
-                  type="button"
-                  onClick={() => onNavigate('soap')}
                   className={cn(
-                    'flex w-full items-center gap-4 rounded-lg border border-border/60 bg-card p-4 text-left transition-colors hover:bg-muted/40 active:scale-[0.99]',
+                    'flex w-full cursor-pointer items-center gap-4 rounded-lg border border-border/60 bg-card p-4 text-left transition-colors hover:bg-muted/40 active:scale-[0.99]',
                     e.muted && 'opacity-80',
                   )}
-                  aria-label={`Open AI EMR for ${e.name}, DOB ${formatEncounterDob(e.dob)}, ${e.gender}, ${e.when}`}
+                  onClick={() => onNavigate('soap')}
+                  role="presentation"
                 >
                   <Avatar className="size-12 shrink-0 rounded-full">
                     <AvatarFallback
@@ -148,10 +238,20 @@ export function HomePage({
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-start justify-between gap-2">
-                      <h3 className="flex min-w-0 flex-1 items-baseline gap-0 overflow-hidden font-bold text-foreground">
-                        <span className="min-w-0 flex-1 truncate">{e.name}</span>
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-0 overflow-hidden rounded-sm border-0 bg-transparent p-0 text-left font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={(ev) => {
+                          ev.stopPropagation()
+                          onOpenEncounterPatient?.(e.id)
+                        }}
+                        aria-label={`View demographics for ${e.name}`}
+                      >
+                        <span className="min-w-0 flex-1 truncate font-bold text-foreground underline-offset-4 decoration-2 decoration-foreground hover:font-extrabold hover:underline">
+                          {e.name}
+                        </span>
                         <span className="shrink-0">, {e.age}</span>
-                      </h3>
+                      </button>
                       <p className="shrink-0 pl-2 text-right text-[11px] font-semibold leading-snug text-muted-foreground whitespace-nowrap">
                         {e.when}
                       </p>
@@ -173,12 +273,15 @@ export function HomePage({
                     </div>
                     <EncounterCodeBadges icdCodes={e.icdCodes} cptCodes={e.cptCodes} />
                   </div>
-                </button>
+                </div>
               ))}
             </div>
-          </section>
+          </motion.section>
 
-          <section className="relative overflow-hidden rounded-lg bg-slate-900 p-6 text-white dark:bg-zinc-950">
+          <motion.section
+            variants={homePageItemVariants}
+            className="relative overflow-hidden rounded-lg bg-slate-900 p-6 text-white dark:bg-zinc-950"
+          >
             <div className="relative z-10">
               <p className="mb-1 text-xs font-bold uppercase tracking-widest text-primary opacity-90">
                 Weekly insight
@@ -201,8 +304,8 @@ export function HomePage({
               className="pointer-events-none absolute -bottom-10 -right-10 size-40 rounded-full bg-primary/20 blur-3xl"
               aria-hidden
             />
-          </section>
-        </div>
+          </motion.section>
+        </motion.div>
       </ScrollArea>
     </div>
   )

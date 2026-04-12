@@ -1,6 +1,6 @@
 {
   "name": "wxt-react-starter",
-  "description": "manifest.json description",
+  "description": "AI-assisted clinical documentation and EMR workflow.",
   "private": true,
   "version": "0.0.0",
   "type": "module",
