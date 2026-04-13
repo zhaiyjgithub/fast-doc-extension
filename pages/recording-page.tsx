@@ -285,6 +285,46 @@ export function RecordingPage({
 
   const speech = useSpeechRecognition({ onFinalResult: handleFinalResult, lang: 'en-US' })
 
+  /**
+   * Request mic from a direct click (required in extension side panels).
+   * After success, transitions to `recording`; STT starts in the effect below.
+   */
+  const beginRecordingAfterMicPermission = React.useCallback(
+    (resetSession: boolean) => {
+      if (!speech.isSupported) {
+        toast.error('Speech recognition is not supported in this browser.')
+        setShowManualInput(true)
+        return
+      }
+      void navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          stream.getTracks().forEach((t) => t.stop())
+          if (resetSession) {
+            setElapsedTime(0)
+            setTranscript('')
+            setLiveLines([])
+            prevLiveLineCountRef.current = 0
+          }
+          setState('recording')
+        })
+        .catch(() => {
+          toast.error(
+            'Microphone access is required to record. Allow the microphone for this extension, then try again.',
+          )
+        })
+    },
+    [speech.isSupported],
+  )
+
+  const togglePauseResume = React.useCallback(() => {
+    if (state === 'recording') {
+      setState('paused')
+      return
+    }
+    beginRecordingAfterMicPermission(false)
+  }, [state, beginRecordingAfterMicPermission])
+
   const updateRecordingHeaderCompact = React.useCallback(() => {
     const sc = scrollRef.current
     const sent = liveScriptSentinelRef.current
@@ -324,21 +364,22 @@ export function RecordingPage({
   // Start / stop speech recognition when recording state changes
   React.useEffect(() => {
     if (state === 'recording') {
-      void speech.start()
+      speech.start()
     } else {
       speech.stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
 
-  // Handle speech recognition errors
+  // Handle speech recognition errors (mic is primed from click; SR errors are edge cases)
   React.useEffect(() => {
     if (!speech.error) return
     if (speech.error === 'microphone-denied') {
       toast.error('Microphone access denied. Please allow mic access and try again.')
-      setShowManualInput(true)
       setState('ready')
-    } else if (speech.error === 'not-supported') {
+      return
+    }
+    if (speech.error === 'not-supported') {
       toast.error('Speech recognition is not supported in this browser.')
       setShowManualInput(true)
       setState('ready')
@@ -643,10 +684,7 @@ export function RecordingPage({
                     whileTap={{ scale: 0.95 }}
                     onClick={() => {
                       if (!requirePatientOrMatch()) return
-                      setState('recording')
-                      setElapsedTime(0)
-                      setTranscript('')
-                      setLiveLines([])
+                      beginRecordingAfterMicPermission(true)
                     }}
                     className="relative flex h-24 w-24 items-center justify-center rounded-full bg-primary shadow-lg"
                     aria-label="Start recording"
@@ -753,7 +791,7 @@ export function RecordingPage({
                         variant="outline"
                         size="lg"
                         className="size-14 rounded-full"
-                        onClick={() => setState(state === 'recording' ? 'paused' : 'recording')}
+                        onClick={togglePauseResume}
                       >
                         {state === 'recording' ? (
                           <Pause className="size-6" />
@@ -802,7 +840,7 @@ export function RecordingPage({
                       variant="outline"
                       size="icon"
                       className="size-10 shrink-0 rounded-full"
-                      onClick={() => setState(state === 'recording' ? 'paused' : 'recording')}
+                      onClick={togglePauseResume}
                     >
                       {state === 'recording' ? (
                         <Pause className="size-5" />

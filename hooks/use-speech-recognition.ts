@@ -11,8 +11,8 @@ export interface UseSpeechRecognitionReturn {
   isListening: boolean
   interimText: string
   error: string | null
-  /** Primes mic permission, then starts recognition. */
-  start: () => Promise<void>
+  /** Starts recognition (mic must already be granted from a user-gesture getUserMedia). */
+  start: () => void
   stop: () => void
   reset: () => void
 }
@@ -93,17 +93,15 @@ export function useSpeechRecognition({
     return r
   }, [SpeechRecognitionCtor, lang])
 
-  const start = React.useCallback(async () => {
+  /**
+   * Starts speech recognition. Does NOT call getUserMedia — Chrome requires
+   * microphone access to be requested from a direct user gesture (click).
+   * Call `navigator.mediaDevices.getUserMedia({ audio: true })` from the
+   * button handler first, then invoke `start()`.
+   */
+  const start = React.useCallback(() => {
     if (!isSupported) {
       setError('not-supported')
-      return
-    }
-    // Prime mic permission first so the browser prompt fires before STT starts
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      stream.getTracks().forEach((t) => t.stop())
-    } catch {
-      setError('microphone-denied')
       return
     }
     shouldRestartRef.current = true
