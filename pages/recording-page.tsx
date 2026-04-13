@@ -1,11 +1,8 @@
 import * as React from 'react'
 import { differenceInYears, format, parseISO, isValid } from 'date-fns'
-import { useSpeechRecognition } from '@/hooks/use-speech-recognition'
-import {
-  mockLLMAttributeSpeakers,
-  attributedSegmentsToTranscript,
-  type RawSegment,
-} from '@/lib/mock-llm-speaker-attribution'
+import { useDeepgramSTT } from '@/hooks/use-deepgram-stt'
+
+const DEEPGRAM_API_KEY = import.meta.env.VITE_DEEPGRAM_API_KEY ?? ''
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -272,7 +269,8 @@ export function RecordingPage({
   const prevLiveLineCountRef = React.useRef(0)
   // Refs that hold mutable values read inside speech callback (avoids stale closure)
   const elapsedTimeRef = React.useRef(0)
-  const activeSpeakerRef = React.useRef<'Doctor' | 'Patient'>('Doctor')
+
+
   // Keep the MediaStream alive during recording so Chrome keeps the mic permission active
   const micStreamRef = React.useRef<MediaStream | null>(null)
 
@@ -291,44 +289,36 @@ export function RecordingPage({
       .catch(() => setMicPermission('prompt'))
   }, [])
 
-  // ── Speech recognition ────────────────────────────────────────────────────
-  const [activeSpeaker, setActiveSpeaker] = React.useState<'Doctor' | 'Patient'>('Doctor')
+  // ── Deepgram STT ──────────────────────────────────────────────────────────
+  const handleFinalSegment = React.useCallback(
+    (text: string, speaker: 'Doctor' | 'Patient') => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      const time = formatTime(elapsedTimeRef.current)
+      setLiveLines((prev) => [...prev, { id, speaker, text, time }])
+    },
+    [],
+  )
 
-  const handleFinalResult = React.useCallback((text: string) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    const time = formatTime(elapsedTimeRef.current)
-    setLiveLines((prev) => [...prev, { id, speaker: activeSpeakerRef.current, text, time }])
-  }, [])
+  const deepgram = useDeepgramSTT({
+    apiKey: DEEPGRAM_API_KEY,
+    language: 'en-US',
+    onFinalSegment: handleFinalSegment,
+  })
 
-  const speech = useSpeechRecognition({ onFinalResult: handleFinalResult, lang: 'en-US' })
-
-  /**
-   * Start a new visit recording from a direct click.
-   *
-   * Chrome Extension Side Panel does NOT show a mic permission prompt when
-   * SpeechRecognition.start() is called directly — it immediately fires
-   * "not-allowed". The only reliable way to get the permission popup is to
-   * call getUserMedia() synchronously in the click handler, then keep the
-   * stream ALIVE while SpeechRecognition is running. Stopping the tracks
-   * early causes Chrome to revoke mic access for SR.
-   */
   const beginNewRecordingFromClick = React.useCallback(() => {
     if (patient == null && matchedPatient == null) {
       toast.warning('Select a patient or match a patient to this visit before recording.')
       return
     }
-    if (!speech.isSupported) {
-      toast.error('Speech recognition is not supported in this browser.')
+    if (!DEEPGRAM_API_KEY) {
+      toast.error('Deepgram API key is not configured. Add VITE_DEEPGRAM_API_KEY to .env.local')
       setShowManualInput(true)
       return
     }
 
-    // Stop any existing stream before requesting a new one
     micStreamRef.current?.getTracks().forEach((t) => t.stop())
     micStreamRef.current = null
 
-    // getUserMedia from click handler → Chrome shows the permission popup here.
-    // We intentionally do NOT stop the tracks so the mic stays active for SR.
     navigator.mediaDevices
       .getUserMedia({ audio: true, video: false })
       .then((stream) => {
@@ -339,20 +329,18 @@ export function RecordingPage({
         setLiveLines([])
         prevLiveLineCountRef.current = 0
         setState('recording')
-        speech.start()
+        deepgram.start(stream)
       })
       .catch((err: unknown) => {
         setMicPermission('denied')
         const name = err instanceof DOMException ? err.name : String(err)
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          toast.error(
-            'Microphone blocked. See the setup guide below.',
-          )
+          toast.error('Microphone blocked. See the setup guide below.')
         } else {
           toast.error(`Could not access microphone: ${name}`)
         }
       })
-  }, [patient, matchedPatient, speech.isSupported, speech.start])
+  }, [patient, matchedPatient, deepgram.start])
 
   /** Stop mic stream helper — call whenever recording fully ends. */
   const stopMicStream = React.useCallback(() => {
@@ -362,15 +350,14 @@ export function RecordingPage({
 
   const togglePauseResume = React.useCallback(() => {
     if (state === 'recording') {
-      speech.stop()
-      // Keep micStreamRef alive on pause so SR can resume without re-requesting permission
+      deepgram.pause()
       setState('paused')
       return
     }
-    // Resume: mic stream is already open, just restart SR
+    // Resume: mic stream still open, MediaRecorder resumes inside hook
+    deepgram.resume()
     setState('recording')
-    speech.start()
-  }, [state, speech.start, speech.stop])
+  }, [state, deepgram.pause, deepgram.resume])
 
   // Cleanup mic stream on unmount
   React.useEffect(() => () => { stopMicStream() }, [stopMicStream])
@@ -400,7 +387,8 @@ export function RecordingPage({
 
   // Keep mutable refs in sync with their state counterparts
   React.useEffect(() => { elapsedTimeRef.current = elapsedTime }, [elapsedTime])
-  React.useEffect(() => { activeSpeakerRef.current = activeSpeaker }, [activeSpeaker])
+
+
 
   React.useEffect(() => {
     return () => {
@@ -411,23 +399,25 @@ export function RecordingPage({
     }
   }, [])
 
-  // Handle speech recognition errors (SR triggers its own mic permission flow)
+  // Handle Deepgram connection errors
   React.useEffect(() => {
-    if (!speech.error) return
-    if (speech.error === 'microphone-denied') {
-      toast.error(
-        'Microphone was blocked. In Chrome: Settings → Privacy and security → Site settings → Microphone — ensure sites can ask, then allow this extension when prompted.',
-      )
-      speech.reset()
+    if (!deepgram.error) return
+    if (deepgram.error === 'api-key-missing') {
+      toast.error('Deepgram API key not set. Add VITE_DEEPGRAM_API_KEY to .env.local')
+      setShowManualInput(true)
       setState('ready')
       return
     }
-    if (speech.error === 'not-supported') {
-      toast.error('Speech recognition is not supported in this browser.')
-      setShowManualInput(true)
+    if (deepgram.error === 'connection-failed') {
+      toast.error('Deepgram connection failed. Check your API key and network, then try again.')
+      setState('ready')
+      return
+    }
+    if (deepgram.error === 'recorder-failed') {
+      toast.error('Microphone recorder error. Try reloading the extension.')
       setState('ready')
     }
-  }, [speech.error, speech.reset])
+  }, [deepgram.error])
 
   /** Only when a new live line is appended — not on start/pause/resume alone. */
   React.useEffect(() => {
@@ -472,21 +462,14 @@ export function RecordingPage({
   }, [state])
 
   const handleStopRecording = () => {
-    speech.stop()
+    deepgram.stop()
     stopMicStream()
 
-    // Build raw segments from live lines, ignoring the manual toggle speaker labels.
-    // The mock LLM will re-attribute speakers based on linguistic heuristics.
-    const rawSegments: RawSegment[] = liveLines.map((l, i) => ({
-      idx: i,
-      text: l.text,
-      time: l.time,
-    }))
-
-    const attributed = mockLLMAttributeSpeakers(rawSegments)
-    const fromLive = attributed.length > 0
-      ? attributedSegmentsToTranscript(attributed)
-      : ''
+    // Transcript already has speaker labels from Deepgram diarization
+    const fromLive =
+      liveLines.length > 0
+        ? liveLines.map((l) => `${l.speaker}: ${l.text}`).join('\n\n').trim()
+        : ''
 
     if (processingTranscriptTimerRef.current) {
       clearTimeout(processingTranscriptTimerRef.current)
@@ -522,9 +505,8 @@ export function RecordingPage({
       clearTimeout(processingTranscriptTimerRef.current)
       processingTranscriptTimerRef.current = null
     }
-    speech.reset()
+    deepgram.reset()
     stopMicStream()
-    setActiveSpeaker('Doctor')
     setState('ready')
     setElapsedTime(0)
     setTranscript('')
@@ -533,7 +515,7 @@ export function RecordingPage({
     setCompactRecordingHeader(false)
     prevLiveLineCountRef.current = 0
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopMicStream])
+  }, [stopMicStream, deepgram.reset])
 
   function handleRequestDismissPatient() {
     if (!onDismissActivePatient) return
@@ -934,30 +916,16 @@ export function RecordingPage({
                 <section className="space-y-3 border-t border-border/50 pt-6">
                   <div className="flex items-center justify-between gap-2 px-0.5">
                     <h3 className="text-sm font-bold text-foreground">Live script</h3>
-                    <div className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted p-0.5">
-                      {(['Doctor', 'Patient'] as const).map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setActiveSpeaker(s)}
-                          className={cn(
-                            'rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase transition-colors',
-                            activeSpeaker === s
-                              ? 'bg-background text-foreground shadow-sm'
-                              : 'text-muted-foreground hover:text-foreground',
-                          )}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
+                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                      AI diarized
+                    </span>
                   </div>
                   <div className="min-h-[100px] rounded-lg border border-border bg-card p-4 shadow-sm ring-1 ring-border/40">
-                    {liveLines.length === 0 && !speech.interimText ? (
+                    {liveLines.length === 0 && !deepgram.interimText ? (
                       <p className="text-center text-xs leading-relaxed text-muted-foreground">
                         {state === 'paused'
                           ? 'Paused — script will continue when you resume.'
-                          : 'Listening… lines will appear as speech is detected.'}
+                          : 'Listening… transcript will appear as speech is detected.'}
                       </p>
                     ) : (
                       <ul className="flex flex-col gap-3">
@@ -988,13 +956,13 @@ export function RecordingPage({
                             </p>
                           </li>
                         ))}
-                        {speech.interimText && (
+                        {deepgram.interimText && (
                           <li className="flex flex-col gap-1 opacity-50">
                             <span className="px-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/80">
-                              {activeSpeaker}
+                              {liveLines.at(-1)?.speaker ?? '…'}
                             </span>
                             <p className="text-sm italic leading-relaxed text-muted-foreground">
-                              {speech.interimText}
+                              {deepgram.interimText}
                             </p>
                           </li>
                         )}
