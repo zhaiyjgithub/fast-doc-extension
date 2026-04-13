@@ -1,8 +1,7 @@
 import * as React from 'react'
 import { differenceInYears, format, parseISO, isValid } from 'date-fns'
 import { useDeepgramSTT } from '@/hooks/use-deepgram-stt'
-
-const DEEPGRAM_API_KEY = import.meta.env.VITE_DEEPGRAM_API_KEY ?? ''
+import { deepgramApiKey } from '@/lib/env'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,6 +19,8 @@ import { AnimatePresence, motion } from 'motion/react'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
 import { toast } from 'sonner'
+
+const DEEPGRAM_API_KEY = deepgramApiKey()
 
 type RecordingState = 'ready' | 'recording' | 'paused' | 'processing'
 
@@ -311,7 +312,7 @@ export function RecordingPage({
       return
     }
     if (!DEEPGRAM_API_KEY) {
-      toast.error('Deepgram API key is not configured. Add VITE_DEEPGRAM_API_KEY to .env.local')
+      toast.error('Deepgram API key is not configured. See .env.example (dev vs production).')
       setShowManualInput(true)
       return
     }
@@ -403,7 +404,7 @@ export function RecordingPage({
   React.useEffect(() => {
     if (!deepgram.error) return
     if (deepgram.error === 'api-key-missing') {
-      toast.error('Deepgram API key not set. Add VITE_DEEPGRAM_API_KEY to .env.local')
+      toast.error('Deepgram API key not set. See .env.example (dev vs production).')
       setShowManualInput(true)
       setState('ready')
       return
