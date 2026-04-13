@@ -286,44 +286,35 @@ export function RecordingPage({
   const speech = useSpeechRecognition({ onFinalResult: handleFinalResult, lang: 'en-US' })
 
   /**
-   * Request mic from a direct click (required in extension side panels).
-   * After success, transitions to `recording`; STT starts in the effect below.
+   * Start a new visit recording from a direct click.
+   * Web Speech API must be started in the same user-gesture turn as the click;
+   * `getUserMedia` in extension side panels often fails even with a gesture, so we
+   * rely on `SpeechRecognition.start()` to trigger Chrome's mic prompt instead.
    */
-  const beginRecordingAfterMicPermission = React.useCallback(
-    (resetSession: boolean) => {
-      if (!speech.isSupported) {
-        toast.error('Speech recognition is not supported in this browser.')
-        setShowManualInput(true)
-        return
-      }
-      void navigator.mediaDevices
-        .getUserMedia({ audio: true })
-        .then((stream) => {
-          stream.getTracks().forEach((t) => t.stop())
-          if (resetSession) {
-            setElapsedTime(0)
-            setTranscript('')
-            setLiveLines([])
-            prevLiveLineCountRef.current = 0
-          }
-          setState('recording')
-        })
-        .catch(() => {
-          toast.error(
-            'Microphone access is required to record. Allow the microphone for this extension, then try again.',
-          )
-        })
-    },
-    [speech.isSupported],
-  )
+  const beginNewRecordingFromClick = React.useCallback(() => {
+    if (!requirePatientOrMatch()) return
+    if (!speech.isSupported) {
+      toast.error('Speech recognition is not supported in this browser.')
+      setShowManualInput(true)
+      return
+    }
+    setElapsedTime(0)
+    setTranscript('')
+    setLiveLines([])
+    prevLiveLineCountRef.current = 0
+    setState('recording')
+    speech.start()
+  }, [speech.isSupported, speech.start])
 
   const togglePauseResume = React.useCallback(() => {
     if (state === 'recording') {
+      speech.stop()
       setState('paused')
       return
     }
-    beginRecordingAfterMicPermission(false)
-  }, [state, beginRecordingAfterMicPermission])
+    setState('recording')
+    speech.start()
+  }, [state, speech.start, speech.stop])
 
   const updateRecordingHeaderCompact = React.useCallback(() => {
     const sc = scrollRef.current
@@ -361,21 +352,14 @@ export function RecordingPage({
     }
   }, [])
 
-  // Start / stop speech recognition when recording state changes
-  React.useEffect(() => {
-    if (state === 'recording') {
-      speech.start()
-    } else {
-      speech.stop()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state])
-
-  // Handle speech recognition errors (mic is primed from click; SR errors are edge cases)
+  // Handle speech recognition errors (SR triggers its own mic permission flow)
   React.useEffect(() => {
     if (!speech.error) return
     if (speech.error === 'microphone-denied') {
-      toast.error('Microphone access denied. Please allow mic access and try again.')
+      toast.error(
+        'Microphone was blocked. In Chrome: Settings → Privacy and security → Site settings → Microphone — ensure sites can ask, then allow this extension when prompted.',
+      )
+      speech.reset()
       setState('ready')
       return
     }
@@ -384,7 +368,7 @@ export function RecordingPage({
       setShowManualInput(true)
       setState('ready')
     }
-  }, [speech.error])
+  }, [speech.error, speech.reset])
 
   /** Only when a new live line is appended — not on start/pause/resume alone. */
   React.useEffect(() => {
@@ -682,10 +666,7 @@ export function RecordingPage({
                     type="button"
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={() => {
-                      if (!requirePatientOrMatch()) return
-                      beginRecordingAfterMicPermission(true)
-                    }}
+                    onClick={beginNewRecordingFromClick}
                     className="relative flex h-24 w-24 items-center justify-center rounded-full bg-primary shadow-lg"
                     aria-label="Start recording"
                   >

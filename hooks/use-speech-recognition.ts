@@ -94,10 +94,10 @@ export function useSpeechRecognition({
   }, [SpeechRecognitionCtor, lang])
 
   /**
-   * Starts speech recognition. Does NOT call getUserMedia — Chrome requires
-   * microphone access to be requested from a direct user gesture (click).
-   * Call `navigator.mediaDevices.getUserMedia({ audio: true })` from the
-   * button handler first, then invoke `start()`.
+   * Starts speech recognition. Call from a click handler so Chrome can show
+   * the mic permission prompt for Web Speech. Avoid pre-calling getUserMedia
+   * from extension side panels — it often fails even with a gesture; SR.start
+   * is more reliable there.
    */
   const start = React.useCallback(() => {
     if (!isSupported) {
