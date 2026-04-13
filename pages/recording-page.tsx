@@ -292,7 +292,11 @@ export function RecordingPage({
    * rely on `SpeechRecognition.start()` to trigger Chrome's mic prompt instead.
    */
   const beginNewRecordingFromClick = React.useCallback(() => {
-    if (!requirePatientOrMatch()) return
+    // Check patient directly using current props/state (avoids stale closure)
+    if (patient == null && matchedPatient == null) {
+      toast.warning('Select a patient or match a patient to this visit before recording.')
+      return
+    }
     if (!speech.isSupported) {
       toast.error('Speech recognition is not supported in this browser.')
       setShowManualInput(true)
@@ -304,7 +308,7 @@ export function RecordingPage({
     prevLiveLineCountRef.current = 0
     setState('recording')
     speech.start()
-  }, [speech.isSupported, speech.start])
+  }, [patient, matchedPatient, speech.isSupported, speech.start])
 
   const togglePauseResume = React.useCallback(() => {
     if (state === 'recording') {
