@@ -276,6 +276,21 @@ export function RecordingPage({
   // Keep the MediaStream alive during recording so Chrome keeps the mic permission active
   const micStreamRef = React.useRef<MediaStream | null>(null)
 
+  // ── Microphone permission state ───────────────────────────────────────────
+  // 'unknown' = not yet checked, 'granted' | 'prompt' | 'denied'
+  const [micPermission, setMicPermission] = React.useState<'unknown' | 'granted' | 'prompt' | 'denied'>('unknown')
+
+  React.useEffect(() => {
+    if (!navigator.permissions) { setMicPermission('prompt'); return }
+    navigator.permissions
+      .query({ name: 'microphone' as PermissionName })
+      .then((status) => {
+        setMicPermission(status.state as 'granted' | 'prompt' | 'denied')
+        status.onchange = () => setMicPermission(status.state as 'granted' | 'prompt' | 'denied')
+      })
+      .catch(() => setMicPermission('prompt'))
+  }, [])
+
   // ── Speech recognition ────────────────────────────────────────────────────
   const [activeSpeaker, setActiveSpeaker] = React.useState<'Doctor' | 'Patient'>('Doctor')
 
@@ -318,6 +333,7 @@ export function RecordingPage({
       .getUserMedia({ audio: true, video: false })
       .then((stream) => {
         micStreamRef.current = stream
+        setMicPermission('granted')
         setElapsedTime(0)
         setTranscript('')
         setLiveLines([])
@@ -326,10 +342,11 @@ export function RecordingPage({
         speech.start()
       })
       .catch((err: unknown) => {
+        setMicPermission('denied')
         const name = err instanceof DOMException ? err.name : String(err)
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
           toast.error(
-            'Microphone access was denied. Open chrome://settings/content/microphone and allow this extension.',
+            'Microphone blocked. See the setup guide below.',
           )
         } else {
           toast.error(`Could not access microphone: ${name}`)
@@ -700,6 +717,35 @@ export function RecordingPage({
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="flex flex-col items-center justify-center space-y-6 py-10"
               >
+                {/* Microphone permission banner — shown when blocked or after a failed attempt */}
+                {micPermission === 'denied' && (
+                  <div className="w-full rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm space-y-3">
+                    <p className="font-semibold text-destructive flex items-center gap-2">
+                      <span>🎙️</span> Microphone access is blocked
+                    </p>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Chrome Extension side panels need explicit microphone permission.
+                      To fix this, open a new Chrome tab, paste the following URL and add
+                      this extension's origin to the Allowed list:
+                    </p>
+                    <code className="block rounded bg-muted px-3 py-2 text-xs font-mono break-all select-all">
+                      chrome://settings/content/microphone
+                    </code>
+                    <p className="text-muted-foreground leading-relaxed text-xs">
+                      Alternatively, right-click the FastDoc extension icon → <strong>Inspect popup</strong>,
+                      open the Console tab, and run:<br />
+                      <code className="font-mono">navigator.mediaDevices.getUserMedia({'{'} audio: true {'}'})</code><br />
+                      This opens the permission prompt in a context where Chrome allows it.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={beginNewRecordingFromClick}
+                      className="w-full rounded-md border border-destructive/50 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+                    >
+                      Retry microphone access
+                    </button>
+                  </div>
+                )}
                 <div className="relative">
                   <motion.div
                     className="absolute inset-0 rounded-full bg-primary/20"
