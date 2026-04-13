@@ -273,6 +273,8 @@ export function RecordingPage({
   // Refs that hold mutable values read inside speech callback (avoids stale closure)
   const elapsedTimeRef = React.useRef(0)
   const activeSpeakerRef = React.useRef<'Doctor' | 'Patient'>('Doctor')
+  // Keep the MediaStream alive during recording so Chrome keeps the mic permission active
+  const micStreamRef = React.useRef<MediaStream | null>(null)
 
   // ── Speech recognition ────────────────────────────────────────────────────
   const [activeSpeaker, setActiveSpeaker] = React.useState<'Doctor' | 'Patient'>('Doctor')
@@ -287,12 +289,15 @@ export function RecordingPage({
 
   /**
    * Start a new visit recording from a direct click.
-   * Web Speech API must be started in the same user-gesture turn as the click;
-   * `getUserMedia` in extension side panels often fails even with a gesture, so we
-   * rely on `SpeechRecognition.start()` to trigger Chrome's mic prompt instead.
+   *
+   * Chrome Extension Side Panel does NOT show a mic permission prompt when
+   * SpeechRecognition.start() is called directly — it immediately fires
+   * "not-allowed". The only reliable way to get the permission popup is to
+   * call getUserMedia() synchronously in the click handler, then keep the
+   * stream ALIVE while SpeechRecognition is running. Stopping the tracks
+   * early causes Chrome to revoke mic access for SR.
    */
   const beginNewRecordingFromClick = React.useCallback(() => {
-    // Check patient directly using current props/state (avoids stale closure)
     if (patient == null && matchedPatient == null) {
       toast.warning('Select a patient or match a patient to this visit before recording.')
       return
@@ -302,23 +307,56 @@ export function RecordingPage({
       setShowManualInput(true)
       return
     }
-    setElapsedTime(0)
-    setTranscript('')
-    setLiveLines([])
-    prevLiveLineCountRef.current = 0
-    setState('recording')
-    speech.start()
+
+    // Stop any existing stream before requesting a new one
+    micStreamRef.current?.getTracks().forEach((t) => t.stop())
+    micStreamRef.current = null
+
+    // getUserMedia from click handler → Chrome shows the permission popup here.
+    // We intentionally do NOT stop the tracks so the mic stays active for SR.
+    navigator.mediaDevices
+      .getUserMedia({ audio: true, video: false })
+      .then((stream) => {
+        micStreamRef.current = stream
+        setElapsedTime(0)
+        setTranscript('')
+        setLiveLines([])
+        prevLiveLineCountRef.current = 0
+        setState('recording')
+        speech.start()
+      })
+      .catch((err: unknown) => {
+        const name = err instanceof DOMException ? err.name : String(err)
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          toast.error(
+            'Microphone access was denied. Open chrome://settings/content/microphone and allow this extension.',
+          )
+        } else {
+          toast.error(`Could not access microphone: ${name}`)
+        }
+      })
   }, [patient, matchedPatient, speech.isSupported, speech.start])
+
+  /** Stop mic stream helper — call whenever recording fully ends. */
+  const stopMicStream = React.useCallback(() => {
+    micStreamRef.current?.getTracks().forEach((t) => t.stop())
+    micStreamRef.current = null
+  }, [])
 
   const togglePauseResume = React.useCallback(() => {
     if (state === 'recording') {
       speech.stop()
+      // Keep micStreamRef alive on pause so SR can resume without re-requesting permission
       setState('paused')
       return
     }
+    // Resume: mic stream is already open, just restart SR
     setState('recording')
     speech.start()
   }, [state, speech.start, speech.stop])
+
+  // Cleanup mic stream on unmount
+  React.useEffect(() => () => { stopMicStream() }, [stopMicStream])
 
   const updateRecordingHeaderCompact = React.useCallback(() => {
     const sc = scrollRef.current
@@ -418,6 +456,7 @@ export function RecordingPage({
 
   const handleStopRecording = () => {
     speech.stop()
+    stopMicStream()
 
     // Build raw segments from live lines, ignoring the manual toggle speaker labels.
     // The mock LLM will re-attribute speakers based on linguistic heuristics.
@@ -467,6 +506,7 @@ export function RecordingPage({
       processingTranscriptTimerRef.current = null
     }
     speech.reset()
+    stopMicStream()
     setActiveSpeaker('Doctor')
     setState('ready')
     setElapsedTime(0)
@@ -476,7 +516,7 @@ export function RecordingPage({
     setCompactRecordingHeader(false)
     prevLiveLineCountRef.current = 0
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [stopMicStream])
 
   function handleRequestDismissPatient() {
     if (!onDismissActivePatient) return
