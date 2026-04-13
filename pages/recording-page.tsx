@@ -267,7 +267,7 @@ export function RecordingPage({
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const liveScriptSentinelRef = React.useRef<HTMLDivElement>(null)
   const prevLiveLineCountRef = React.useRef(0)
-  // Refs that hold mutable values read inside speech callback (avoids stale closure)
+  // Ref that holds elapsed time read inside the Deepgram final-segment callback (avoids stale closure)
   const elapsedTimeRef = React.useRef(0)
 
 
