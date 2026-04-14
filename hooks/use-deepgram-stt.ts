@@ -121,6 +121,8 @@ function groupWordsBySpeaker(
 const DEEPGRAM_URL = 'wss://api.deepgram.com/v1/listen'
 const KEEPALIVE_INTERVAL_MS = 3000
 const RECORDER_TIMESLICE_MS = 250
+const RECORDER_STOP_FINALIZE_MS = 500
+const STOP_FINALIZE_TAIL_GRACE_MS = 250
 
 export function useDeepgramSTT({
   apiKey,
@@ -135,6 +137,10 @@ export function useDeepgramSTT({
   const wsRef = React.useRef<WebSocket | null>(null)
   const recorderRef = React.useRef<MediaRecorder | null>(null)
   const keepAliveRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+  /** Bumped on intentional close and each `start`; WS handlers capture `sessionId` and no-op when stale. */
+  const sessionIdRef = React.useRef(0)
+  const streamRef = React.useRef<MediaStream | null>(null)
+  const stopTailTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Keep callbacks in refs to avoid stale closures
   const onFinalSegmentRef = React.useRef(onFinalSegment)
@@ -149,10 +155,27 @@ export function useDeepgramSTT({
     }
   }, [])
 
+  const stopStreamTracks = React.useCallback(() => {
+    const s = streamRef.current
+    if (!s) return
+    for (const t of s.getTracks()) {
+      try { t.stop() } catch { /* ignore */ }
+    }
+    streamRef.current = null
+  }, [])
+
+  const clearStopTailTimer = React.useCallback(() => {
+    if (stopTailTimerRef.current !== null) {
+      clearTimeout(stopTailTimerRef.current)
+      stopTailTimerRef.current = null
+    }
+  }, [])
+
   const closeWS = React.useCallback((sendClose = true) => {
     clearKeepAlive()
     const ws = wsRef.current
     if (!ws) return
+    sessionIdRef.current += 1
     if (sendClose && ws.readyState === WebSocket.OPEN) {
       try { ws.send(JSON.stringify({ type: 'CloseStream' })) } catch { /* ignore */ }
     }
@@ -170,15 +193,18 @@ export function useDeepgramSTT({
   }, [])
 
   const reset = React.useCallback(() => {
+    clearStopTailTimer()
     stopRecorder()
     closeWS(false)
+    stopStreamTracks()
     setIsConnected(false)
     setInterimText('')
     setError(null)
-  }, [stopRecorder, closeWS])
+  }, [clearStopTailTimer, stopRecorder, closeWS, stopStreamTracks])
 
   const start = React.useCallback((stream: MediaStream) => {
-    if (!apiKey) {
+    const token = apiKey.trim()
+    if (!token) {
       setError('api-key-missing')
       return
     }
@@ -186,10 +212,17 @@ export function useDeepgramSTT({
     // Cleanup any previous session
     stopRecorder()
     closeWS(false)
+    stopStreamTracks()
     setError(null)
     setInterimText('')
 
-    // Build Deepgram URL with query params
+    streamRef.current = stream
+
+    sessionIdRef.current += 1
+    const sessionId = sessionIdRef.current
+    const isOwnedSession = () => sessionIdRef.current === sessionId
+
+    // Build Deepgram URL with query params (token must be URL-encoded when present).
     const params = new URLSearchParams({
       model: 'nova-3',
       language,
@@ -201,107 +234,184 @@ export function useDeepgramSTT({
       vad_events: 'true',
       // audio/webm container — Deepgram auto-detects; no encoding/sample_rate needed
     })
-    // Browser WebSocket cannot set custom headers; pass API key as query param
-    const url = `${DEEPGRAM_URL}?${params.toString()}&token=${apiKey}`
+    const urlWithoutToken = `${DEEPGRAM_URL}?${params.toString()}`
+    params.set('token', token)
+    const urlWithToken = `${DEEPGRAM_URL}?${params.toString()}`
 
-    const ws = new WebSocket(url)
-    wsRef.current = ws
+    let opened = false
+    let fallbackTried = false
 
-    ws.onopen = () => {
-      setIsConnected(true)
-      setError(null)
+    const detachWs = (sock: WebSocket) => {
+      sock.onopen = null
+      sock.onmessage = null
+      sock.onerror = null
+      sock.onclose = null
+    }
 
-      // Start KeepAlive to prevent 10s idle timeout
-      keepAliveRef.current = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          try { ws.send(JSON.stringify({ type: 'KeepAlive' })) } catch { /* ignore */ }
-        }
-      }, KEEPALIVE_INTERVAL_MS)
+    const maybeFallbackToQueryToken = (failedWs: WebSocket) => {
+      if (!isOwnedSession()) return
+      if (wsRef.current !== failedWs) return
+      if (opened || fallbackTried) return
+      fallbackTried = true
+      detachWs(failedWs)
+      try { failedWs.close() } catch { /* ignore */ }
+      connect(false)
+    }
 
-      // Start MediaRecorder — only after WS is open
-      let recorder: MediaRecorder
-      try {
-        recorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm;codecs=opus',
-          audioBitsPerSecond: 128_000,
-        })
-      } catch {
-        // Fallback: let browser choose
+    const connect = (useSubprotocolAuth: boolean) => {
+      if (!isOwnedSession()) return
+      const ws = useSubprotocolAuth
+        ? new WebSocket(urlWithoutToken, ['token', token])
+        : new WebSocket(urlWithToken)
+      if (!isOwnedSession()) {
+        try { ws.close() } catch { /* ignore */ }
+        return
+      }
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        if (!isOwnedSession() || wsRef.current !== ws) return
+        opened = true
+        setIsConnected(true)
+        setError(null)
+
+        // Start KeepAlive to prevent 10s idle timeout
+        keepAliveRef.current = setInterval(() => {
+          if (!isOwnedSession() || wsRef.current !== ws) return
+          if (ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ type: 'KeepAlive' })) } catch { /* ignore */ }
+          }
+        }, KEEPALIVE_INTERVAL_MS)
+
+        // Start MediaRecorder — only after WS is open
+        let recorder: MediaRecorder
         try {
-          recorder = new MediaRecorder(stream)
-        } catch (err) {
+          recorder = new MediaRecorder(stream, {
+            mimeType: 'audio/webm;codecs=opus',
+            audioBitsPerSecond: 128_000,
+          })
+        } catch {
+          // Fallback: let browser choose
+          try {
+            recorder = new MediaRecorder(stream)
+          } catch (err) {
+            if (!isOwnedSession() || wsRef.current !== ws) return
+            setError('recorder-failed')
+            setIsConnected(false)
+            stopStreamTracks()
+            closeWS()
+            return
+          }
+        }
+
+        if (!isOwnedSession() || wsRef.current !== ws) return
+
+        recorder.addEventListener('dataavailable', (e) => {
+          if (!isOwnedSession() || wsRef.current !== ws) return
+          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+            ws.send(e.data)
+          }
+        })
+
+        recorder.addEventListener('error', () => {
+          if (!isOwnedSession() || wsRef.current !== ws) return
           setError('recorder-failed')
-          closeWS()
+          setIsConnected(false)
+          stopRecorder()
+          stopStreamTracks()
+          closeWS(true)
+        })
+
+        recorderRef.current = recorder
+        recorder.start(RECORDER_TIMESLICE_MS)
+      }
+
+      ws.onmessage = (event) => {
+        if (!isOwnedSession() || wsRef.current !== ws) return
+        let msg: DeepgramMessage
+        try {
+          msg = JSON.parse(event.data as string) as DeepgramMessage
+        } catch {
           return
         }
-      }
 
-      recorder.addEventListener('dataavailable', (e) => {
-        if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          ws.send(e.data)
+        if (msg.type !== 'Results') return
+        const result = msg as DeepgramResultMessage
+        const alt = result.channel.alternatives[0]
+        if (!alt) return
+
+        if (!result.is_final) {
+          // Interim — just update ghost line
+          const interim = alt.transcript
+          setInterimText(interim)
+          onInterimUpdateRef.current?.(interim)
+          return
         }
-      })
 
-      recorder.addEventListener('error', () => {
-        setError('recorder-failed')
-      })
+        // Final result — clear interim and emit segments
+        setInterimText('')
+        onInterimUpdateRef.current?.('')
 
-      recorderRef.current = recorder
-      recorder.start(RECORDER_TIMESLICE_MS)
-    }
+        const transcript = alt.transcript.trim()
+        if (!transcript) return
 
-    ws.onmessage = (event) => {
-      let msg: DeepgramMessage
-      try {
-        msg = JSON.parse(event.data as string) as DeepgramMessage
-      } catch {
-        return
-      }
-
-      if (msg.type !== 'Results') return
-      const result = msg as DeepgramResultMessage
-      const alt = result.channel.alternatives[0]
-      if (!alt) return
-
-      if (!result.is_final) {
-        // Interim — just update ghost line
-        const interim = alt.transcript
-        setInterimText(interim)
-        onInterimUpdateRef.current?.(interim)
-        return
-      }
-
-      // Final result — clear interim and emit segments
-      setInterimText('')
-      onInterimUpdateRef.current?.('')
-
-      const transcript = alt.transcript.trim()
-      if (!transcript) return
-
-      const hasDiarization = alt.words.length > 0 && alt.words[0]!.speaker !== undefined
-      if (hasDiarization) {
-        const groups = groupWordsBySpeaker(alt.words)
-        for (const group of groups) {
-          const text = group.text.trim()
-          if (text) onFinalSegmentRef.current(text, speakerLabel(group.speaker))
+        const hasDiarization = alt.words.length > 0 && alt.words[0]!.speaker !== undefined
+        if (hasDiarization) {
+          const groups = groupWordsBySpeaker(alt.words)
+          for (const group of groups) {
+            const text = group.text.trim()
+            if (text) onFinalSegmentRef.current(text, speakerLabel(group.speaker))
+          }
+        } else {
+          // No diarization data — emit as Doctor (fallback)
+          onFinalSegmentRef.current(transcript, 'Doctor')
         }
-      } else {
-        // No diarization data — emit as Doctor (fallback)
-        onFinalSegmentRef.current(transcript, 'Doctor')
+      }
+
+      ws.onerror = () => {
+        if (!isOwnedSession() || wsRef.current !== ws) return
+        if (opened) {
+          stopRecorder()
+          closeWS(true)
+          stopStreamTracks()
+          setError('connection-failed')
+          setIsConnected(false)
+          return
+        }
+        if (useSubprotocolAuth) {
+          maybeFallbackToQueryToken(ws)
+          return
+        }
+        setError('connection-failed')
+        setIsConnected(false)
+        stopStreamTracks()
+        closeWS(false)
+      }
+
+      ws.onclose = () => {
+        if (!isOwnedSession() || wsRef.current !== ws) return
+        if (opened) {
+          stopRecorder()
+          closeWS(true)
+          stopStreamTracks()
+          setError('connection-failed')
+          setIsConnected(false)
+          return
+        }
+        if (useSubprotocolAuth) {
+          maybeFallbackToQueryToken(ws)
+          return
+        }
+        setError('connection-failed')
+        setIsConnected(false)
+        stopStreamTracks()
+        closeWS(false)
       }
     }
 
-    ws.onerror = () => {
-      setError('connection-failed')
-      setIsConnected(false)
-      clearKeepAlive()
-    }
-
-    ws.onclose = () => {
-      setIsConnected(false)
-      clearKeepAlive()
-    }
-  }, [apiKey, language, clearKeepAlive, closeWS, stopRecorder])
+    // Browser-recommended auth first; query `token` if handshake never opens (handles both onerror/onclose once).
+    connect(true)
+  }, [apiKey, language, closeWS, stopRecorder, stopStreamTracks])
 
   const pause = React.useCallback(() => {
     const r = recorderRef.current
@@ -319,17 +429,60 @@ export function useDeepgramSTT({
   }, [])
 
   const stop = React.useCallback(() => {
-    stopRecorder()
-    closeWS(true) // sends CloseStream then closes WS
+    clearStopTailTimer()
     setIsConnected(false)
     setInterimText('')
-  }, [stopRecorder, closeWS])
+
+    const scheduleTailClose = () => {
+      clearStopTailTimer()
+      const ws = wsRef.current
+      if (ws?.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: 'Finalize' })) } catch { /* ignore */ }
+        stopTailTimerRef.current = setTimeout(() => {
+          stopTailTimerRef.current = null
+          stopStreamTracks()
+          closeWS(true)
+        }, STOP_FINALIZE_TAIL_GRACE_MS)
+      } else {
+        stopStreamTracks()
+        closeWS(true)
+      }
+    }
+
+    const r = recorderRef.current
+    if (!r || r.state === 'inactive') {
+      recorderRef.current = null
+      scheduleTailClose()
+      return
+    }
+    const rec = r
+    let done = false
+    let timeoutId: ReturnType<typeof setTimeout>
+    const finalize = () => {
+      if (done) return
+      done = true
+      clearTimeout(timeoutId)
+      rec.removeEventListener('stop', finalize)
+      if (recorderRef.current !== rec) return
+      recorderRef.current = null
+      scheduleTailClose()
+    }
+    timeoutId = setTimeout(finalize, RECORDER_STOP_FINALIZE_MS)
+    rec.addEventListener('stop', finalize)
+    try {
+      if (rec.state !== 'inactive') rec.stop()
+    } catch {
+      finalize()
+    }
+  }, [clearStopTailTimer, closeWS, stopStreamTracks])
 
   // Cleanup on unmount
   React.useEffect(() => () => {
+    clearStopTailTimer()
     stopRecorder()
+    stopStreamTracks()
     closeWS(false)
-  }, [stopRecorder, closeWS])
+  }, [clearStopTailTimer, stopRecorder, stopStreamTracks, closeWS])
 
   return { isConnected, interimText, error, start, pause, resume, stop, reset }
 }

@@ -343,6 +343,41 @@ export function RecordingPage({
       })
   }, [patient, matchedPatient, deepgram.start])
 
+  const handleCancelGenerateAndResume = React.useCallback(() => {
+    if (processingTranscriptTimerRef.current) {
+      clearTimeout(processingTranscriptTimerRef.current)
+      processingTranscriptTimerRef.current = null
+    }
+
+    if (!DEEPGRAM_API_KEY) {
+      toast.error('Deepgram API key is not configured. See .env.example (dev vs production).')
+      setShowManualInput(true)
+      return
+    }
+
+    micStreamRef.current?.getTracks().forEach((t) => t.stop())
+    micStreamRef.current = null
+
+    navigator.mediaDevices
+      .getUserMedia({ audio: true, video: false })
+      .then((stream) => {
+        micStreamRef.current = stream
+        setMicPermission('granted')
+        setTranscript('')
+        setState('recording')
+        deepgram.start(stream)
+      })
+      .catch((err: unknown) => {
+        setMicPermission('denied')
+        const name = err instanceof DOMException ? err.name : String(err)
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          toast.error('Microphone blocked. See the setup guide below.')
+        } else {
+          toast.error(`Could not access microphone: ${name}`)
+        }
+      })
+  }, [deepgram.start])
+
   /** Stop mic stream helper — call whenever recording fully ends. */
   const stopMicStream = React.useCallback(() => {
     micStreamRef.current?.getTracks().forEach((t) => t.stop())
@@ -482,15 +517,6 @@ export function RecordingPage({
       setTranscript(fromLive || DEMO_TRANSCRIPT)
       processingTranscriptTimerRef.current = null
     }, 400)
-  }
-
-  const handleCancelGenerateAndResume = () => {
-    if (processingTranscriptTimerRef.current) {
-      clearTimeout(processingTranscriptTimerRef.current)
-      processingTranscriptTimerRef.current = null
-    }
-    setTranscript('')
-    setState('paused')
   }
 
   /** Paused (or similar) visit with clock or live lines — discarding patient would lose this session. */
