@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { differenceInYears, format, parseISO, isValid } from 'date-fns'
 import { useDeepgramSTT } from '@/hooks/use-deepgram-stt'
+import { getDeepgramTemporaryToken } from '@/lib/deepgram-temporary-token'
 import { deepgramApiKey } from '@/lib/env'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,6 +22,7 @@ import type { Patient } from '@/components/patient/patient-search-sheet'
 import { toast } from 'sonner'
 
 const DEEPGRAM_API_KEY = deepgramApiKey()
+const DEEPGRAM_CONNECT_TIMEOUT_MS = 15_000
 
 type RecordingState = 'ready' | 'recording' | 'paused' | 'processing'
 
@@ -257,6 +259,7 @@ export function RecordingPage({
   onDismissActivePatient,
 }: RecordingPageProps) {
   const [state, setState] = React.useState<RecordingState>('ready')
+  const [isConnectingDeepgram, setIsConnectingDeepgram] = React.useState(false)
   const [elapsedTime, setElapsedTime] = React.useState(0)
   const [transcript, setTranscript] = React.useState('')
   const [liveLines, setLiveLines] = React.useState<LiveLine[]>([])
@@ -268,6 +271,7 @@ export function RecordingPage({
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const liveScriptSentinelRef = React.useRef<HTMLDivElement>(null)
   const prevLiveLineCountRef = React.useRef(0)
+  const isResumingFromProcessingRef = React.useRef(false)
   // Ref that holds elapsed time read inside the Deepgram final-segment callback (avoids stale closure)
   const elapsedTimeRef = React.useRef(0)
 
@@ -300,8 +304,14 @@ export function RecordingPage({
     [],
   )
 
+  const fetchDeepgramAccessToken = React.useCallback(
+    () => getDeepgramTemporaryToken(DEEPGRAM_API_KEY),
+    [],
+  )
+
   const deepgram = useDeepgramSTT({
     apiKey: DEEPGRAM_API_KEY,
+    getAccessToken: fetchDeepgramAccessToken,
     language: 'en-US',
     onFinalSegment: handleFinalSegment,
   })
@@ -330,6 +340,7 @@ export function RecordingPage({
         setLiveLines([])
         prevLiveLineCountRef.current = 0
         setState('recording')
+        setIsConnectingDeepgram(true)
         deepgram.start(stream)
       })
       .catch((err: unknown) => {
@@ -363,11 +374,16 @@ export function RecordingPage({
       .then((stream) => {
         micStreamRef.current = stream
         setMicPermission('granted')
-        setTranscript('')
-        setState('recording')
+        isResumingFromProcessingRef.current = true
+        setIsConnectingDeepgram(true)
         deepgram.start(stream)
       })
       .catch((err: unknown) => {
+        setIsConnectingDeepgram(false)
+        const preserveProcessing =
+          isResumingFromProcessingRef.current && transcript.trim().length > 0
+        isResumingFromProcessingRef.current = false
+        setState(preserveProcessing ? 'processing' : 'ready')
         setMicPermission('denied')
         const name = err instanceof DOMException ? err.name : String(err)
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
@@ -376,7 +392,7 @@ export function RecordingPage({
           toast.error(`Could not access microphone: ${name}`)
         }
       })
-  }, [deepgram.start])
+  }, [deepgram.start, transcript])
 
   /** Stop mic stream helper — call whenever recording fully ends. */
   const stopMicStream = React.useCallback(() => {
@@ -385,6 +401,7 @@ export function RecordingPage({
   }, [])
 
   const togglePauseResume = React.useCallback(() => {
+    if (isConnectingDeepgram) return
     if (state === 'recording') {
       deepgram.pause()
       setState('paused')
@@ -393,7 +410,7 @@ export function RecordingPage({
     // Resume: mic stream still open, MediaRecorder resumes inside hook
     deepgram.resume()
     setState('recording')
-  }, [state, deepgram.pause, deepgram.resume])
+  }, [state, isConnectingDeepgram, deepgram.pause, deepgram.resume])
 
   // Cleanup mic stream on unmount
   React.useEffect(() => () => { stopMicStream() }, [stopMicStream])
@@ -411,7 +428,7 @@ export function RecordingPage({
   }, [state])
 
   React.useEffect(() => {
-    if (state === 'recording') {
+    if (state === 'recording' && !isConnectingDeepgram) {
       timerRef.current = setInterval(() => setElapsedTime((t) => t + 1), 1000)
     } else if (timerRef.current) {
       clearInterval(timerRef.current)
@@ -419,7 +436,7 @@ export function RecordingPage({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [state])
+  }, [state, isConnectingDeepgram])
 
   // Keep mutable refs in sync with their state counterparts
   React.useEffect(() => { elapsedTimeRef.current = elapsedTime }, [elapsedTime])
@@ -435,25 +452,79 @@ export function RecordingPage({
     }
   }, [])
 
+  React.useEffect(() => {
+    if (!deepgram.isConnected) return
+    setIsConnectingDeepgram(false)
+    if (isResumingFromProcessingRef.current) {
+      isResumingFromProcessingRef.current = false
+      setTranscript('')
+      setState('recording')
+    }
+  }, [deepgram.isConnected])
+
+  React.useEffect(() => {
+    if (!isConnectingDeepgram) return
+    const timeout = setTimeout(() => {
+      deepgram.reset()
+      stopMicStream()
+
+      const preserveProcessing =
+        isResumingFromProcessingRef.current && transcript.trim().length > 0
+      isResumingFromProcessingRef.current = false
+      setIsConnectingDeepgram(false)
+      setState(preserveProcessing ? 'processing' : 'ready')
+      toast.error('Deepgram connection timed out. Please try again.')
+    }, DEEPGRAM_CONNECT_TIMEOUT_MS)
+
+    return () => clearTimeout(timeout)
+  }, [isConnectingDeepgram, deepgram.reset, stopMicStream, transcript])
+
   // Handle Deepgram connection errors
   React.useEffect(() => {
     if (!deepgram.error) return
+    const isResumingFromProcessing = isResumingFromProcessingRef.current
+    isResumingFromProcessingRef.current = false
+    setIsConnectingDeepgram(false)
+    const preserveProcessing = isResumingFromProcessing && transcript.trim().length > 0
     if (deepgram.error === 'api-key-missing') {
       toast.error('Deepgram API key not set. See .env.example (dev vs production).')
-      setShowManualInput(true)
-      setState('ready')
+      if (!preserveProcessing) {
+        setShowManualInput(true)
+        setState('ready')
+      } else {
+        setState('processing')
+      }
+      return
+    }
+    if (deepgram.error === 'token-fetch-failed') {
+      toast.error(
+        'Could not obtain a Deepgram access token. Check your API key and network, then try again.',
+      )
+      if (!preserveProcessing) {
+        setState('ready')
+      } else {
+        setState('processing')
+      }
       return
     }
     if (deepgram.error === 'connection-failed') {
       toast.error('Deepgram connection failed. Check your API key and network, then try again.')
-      setState('ready')
+      if (!preserveProcessing) {
+        setState('ready')
+      } else {
+        setState('processing')
+      }
       return
     }
     if (deepgram.error === 'recorder-failed') {
       toast.error('Microphone recorder error. Try reloading the extension.')
-      setState('ready')
+      if (!preserveProcessing) {
+        setState('ready')
+      } else {
+        setState('processing')
+      }
     }
-  }, [deepgram.error])
+  }, [deepgram.error, transcript])
 
   /** Only when a new live line is appended — not on start/pause/resume alone. */
   React.useEffect(() => {
@@ -498,6 +569,7 @@ export function RecordingPage({
   }, [state])
 
   const handleStopRecording = () => {
+    if (isConnectingDeepgram) return
     deepgram.stop()
     stopMicStream()
 
@@ -534,6 +606,8 @@ export function RecordingPage({
     }
     deepgram.reset()
     stopMicStream()
+    isResumingFromProcessingRef.current = false
+    setIsConnectingDeepgram(false)
     setState('ready')
     setElapsedTime(0)
     setTranscript('')
@@ -573,6 +647,15 @@ export function RecordingPage({
   const patientGenderLabel = activePatient?.gender
     ? genderDisplayLabel(activePatient.gender)
     : null
+  const patientStatusLabel = isConnectingDeepgram
+    ? 'Connecting'
+    : state === 'recording'
+      ? 'Recording'
+      : state === 'paused'
+        ? 'Paused'
+        : state === 'ready'
+          ? 'Ready'
+          : 'Processing'
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -665,16 +748,14 @@ export function RecordingPage({
                 <span
                   className={cn(
                     'shrink-0 text-xs font-semibold',
-                    state === 'recording' && 'text-destructive',
+                    isConnectingDeepgram && 'text-muted-foreground',
+                    !isConnectingDeepgram && state === 'recording' && 'text-destructive',
                     state === 'paused' && 'text-amber-600 dark:text-amber-400',
                     state === 'ready' && 'text-muted-foreground',
                     state === 'processing' && 'text-muted-foreground',
                   )}
                 >
-                  {state === 'recording' && 'Recording'}
-                  {state === 'paused' && 'Paused'}
-                  {state === 'ready' && 'Ready'}
-                  {state === 'processing' && 'Processing'}
+                  {patientStatusLabel}
                 </span>
               </div>
               <h2 className="mt-1 text-lg font-extrabold text-foreground">
@@ -849,7 +930,11 @@ export function RecordingPage({
                             'linear-gradient(135deg, oklch(0.962 0.018 272.314), oklch(0.93 0.034 272.788))',
                         }}
                       >
-                        {state === 'recording' ? (
+                        {isConnectingDeepgram ? (
+                          <div className="flex h-16 items-center justify-center">
+                            <Loader2 className="size-8 animate-spin text-primary/60" />
+                          </div>
+                        ) : state === 'recording' ? (
                           <AudioWaveform />
                         ) : (
                           <div className="flex h-16 items-center justify-center">
@@ -872,6 +957,7 @@ export function RecordingPage({
                         size="lg"
                         className="size-14 rounded-full"
                         onClick={togglePauseResume}
+                        disabled={isConnectingDeepgram}
                       >
                         {state === 'recording' ? (
                           <Pause className="size-6" />
@@ -886,6 +972,7 @@ export function RecordingPage({
                         size="lg"
                         className="size-14 rounded-full"
                         onClick={handleStopRecording}
+                        disabled={isConnectingDeepgram}
                       >
                         <Square className="size-6 fill-current" />
                       </Button>
@@ -904,7 +991,11 @@ export function RecordingPage({
                           'linear-gradient(135deg, oklch(0.962 0.018 272.314), oklch(0.93 0.034 272.788))',
                       }}
                     >
-                      {state === 'recording' ? (
+                      {isConnectingDeepgram ? (
+                        <div className="flex h-10 items-center justify-center">
+                          <Loader2 className="size-6 animate-spin text-primary/60" />
+                        </div>
+                      ) : state === 'recording' ? (
                         <AudioWaveform compact />
                       ) : (
                         <div className="flex h-10 items-center justify-center">
@@ -921,6 +1012,7 @@ export function RecordingPage({
                       size="icon"
                       className="size-10 shrink-0 rounded-full"
                       onClick={togglePauseResume}
+                      disabled={isConnectingDeepgram}
                     >
                       {state === 'recording' ? (
                         <Pause className="size-5" />
@@ -934,6 +1026,7 @@ export function RecordingPage({
                       size="icon"
                       className="size-10 shrink-0 rounded-full"
                       onClick={handleStopRecording}
+                      disabled={isConnectingDeepgram}
                     >
                       <Square className="size-5 fill-current" />
                     </Button>
@@ -950,7 +1043,9 @@ export function RecordingPage({
                   <div className="min-h-[100px] rounded-lg border border-border bg-card p-4 shadow-sm ring-1 ring-border/40">
                     {liveLines.length === 0 && !deepgram.interimText ? (
                       <p className="text-center text-xs leading-relaxed text-muted-foreground">
-                        {state === 'paused'
+                        {isConnectingDeepgram
+                          ? 'Connecting to Deepgram…'
+                          : state === 'paused'
                           ? 'Paused — script will continue when you resume.'
                           : 'Listening… transcript will appear as speech is detected.'}
                       </p>
@@ -1042,8 +1137,9 @@ export function RecordingPage({
                       variant="outline"
                       className="h-11 w-full"
                       onClick={handleCancelGenerateAndResume}
+                      disabled={isConnectingDeepgram}
                     >
-                      Cancel and continue recording
+                      {isConnectingDeepgram ? 'Connecting…' : 'Cancel and continue recording'}
                     </Button>
                   </>
                 )}

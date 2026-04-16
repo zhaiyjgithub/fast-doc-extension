@@ -1,8 +1,8 @@
 {
-  "name": "wxt-react-starter",
-  "description": "AI-assisted clinical documentation and EMR workflow.",
+  "name": "FastDoc",
+  "description": "Your AI Scribe for modern clinical practices",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",

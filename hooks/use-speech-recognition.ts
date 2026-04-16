@@ -1,5 +1,50 @@
 import * as React from 'react'
 
+interface SpeechRecognitionAlternativeLike {
+  transcript: string
+}
+
+interface SpeechRecognitionResultLike {
+  isFinal: boolean
+  length: number
+  [index: number]: SpeechRecognitionAlternativeLike
+}
+
+interface SpeechRecognitionResultListLike {
+  length: number
+  [index: number]: SpeechRecognitionResultLike
+}
+
+interface SpeechRecognitionEventLike extends Event {
+  resultIndex: number
+  results: SpeechRecognitionResultListLike
+}
+
+interface SpeechRecognitionErrorEventLike extends Event {
+  error: string
+}
+
+interface SpeechRecognitionLike extends EventTarget {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  maxAlternatives: number
+  onstart: ((this: SpeechRecognitionLike, ev: Event) => unknown) | null
+  onend: ((this: SpeechRecognitionLike, ev: Event) => unknown) | null
+  onerror: ((this: SpeechRecognitionLike, ev: SpeechRecognitionErrorEventLike) => unknown) | null
+  onresult: ((this: SpeechRecognitionLike, ev: SpeechRecognitionEventLike) => unknown) | null
+  start: () => void
+  stop: () => void
+  abort: () => void
+}
+
+type SpeechRecognitionCtorLike = new () => SpeechRecognitionLike
+
+type SpeechWindow = Window & {
+  SpeechRecognition?: SpeechRecognitionCtorLike
+  webkitSpeechRecognition?: SpeechRecognitionCtorLike
+}
+
 export interface UseSpeechRecognitionOptions {
   /** Called for each finalized speech segment. */
   onFinalResult: (text: string) => void
@@ -23,11 +68,13 @@ export function useSpeechRecognition({
 }: UseSpeechRecognitionOptions): UseSpeechRecognitionReturn {
   const SpeechRecognitionCtor =
     typeof window !== 'undefined'
-      ? (window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null)
+      ? (((window as SpeechWindow).SpeechRecognition ??
+          (window as SpeechWindow).webkitSpeechRecognition) ??
+        null)
       : null
   const isSupported = SpeechRecognitionCtor !== null
 
-  const recognitionRef = React.useRef<SpeechRecognition | null>(null)
+  const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null)
   const shouldRestartRef = React.useRef(false)
   const onFinalResultRef = React.useRef(onFinalResult)
   React.useEffect(() => {
@@ -38,7 +85,7 @@ export function useSpeechRecognition({
   const [interimText, setInterimText] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
 
-  const createRecognition = React.useCallback((): SpeechRecognition | null => {
+  const createRecognition = React.useCallback((): SpeechRecognitionLike | null => {
     if (!SpeechRecognitionCtor) return null
     const r = new SpeechRecognitionCtor()
     r.continuous = true
@@ -66,7 +113,7 @@ export function useSpeechRecognition({
         }, 200)
       }
     }
-    r.onerror = (e: SpeechRecognitionErrorEvent) => {
+    r.onerror = (e: SpeechRecognitionErrorEventLike) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         shouldRestartRef.current = false
         setIsListening(false)
@@ -75,7 +122,7 @@ export function useSpeechRecognition({
       }
       // 'no-speech', 'audio-capture', network errors: let onend handle restart
     }
-    r.onresult = (e: SpeechRecognitionEvent) => {
+    r.onresult = (e: SpeechRecognitionEventLike) => {
       let interim = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i]
