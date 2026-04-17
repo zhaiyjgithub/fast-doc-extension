@@ -36,6 +36,11 @@ interface SoapPageProps {
   patient?: Patient | null
   /** Opens patient search sheet when no patient is selected. */
   onOpenPatientPicker?: () => void
+  onSyncToEmr?: (payload: {
+    chiefComplaintText: string
+    presentIllnessText: string
+    autoSave?: boolean
+  }) => Promise<void> | void
 }
 
 type SectionId = 'subjective' | 'objective' | 'assessment' | 'plan'
@@ -491,7 +496,7 @@ function SoapFabMenu({
   )
 }
 
-export function SoapPage({ patient, onOpenPatientPicker }: SoapPageProps) {
+export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPageProps) {
   const [expanded, setExpanded] = React.useState<Record<SectionId, boolean>>(() =>
     Object.fromEntries(SECTIONS.map((s) => [s.id, true])) as Record<SectionId, boolean>,
   )
@@ -519,8 +524,36 @@ export function SoapPage({ patient, onOpenPatientPicker }: SoapPageProps) {
     )
   }
 
-  function handleExport() {
-    toast.success('Export (demo) — note would be sent to your EHR.')
+  function buildChiefComplaintSyncPayload() {
+    const icdCodeList = ICD_FINDINGS.map((row) => row.icdCode).join(', ')
+    const cptCodeList = CPT_FINDINGS.map((row) => row.cptCode).join(', ')
+
+    const presentIllnessText = [
+      `Objective:\n${bodies.objective}`,
+      `Assessment:\n${bodies.assessment}`,
+      `Plan:\n${bodies.plan}`,
+      `ICD: ${icdCodeList || 'None'}`,
+      `CPT: ${cptCodeList || 'None'}`,
+    ]
+      .map((section) => section.trim())
+      .filter(Boolean)
+      .join('\n\n')
+
+    return {
+      chiefComplaintText: bodies.subjective.trim(),
+      presentIllnessText,
+      // MDLand: DocPro-aligned path uses procbar / SavePage guard (not raw saveIt on wrong frame).
+      autoSave: true,
+    }
+  }
+
+  async function handleExport() {
+    if (!onSyncToEmr) {
+      toast.success('Export (demo) — note would be sent to your EHR.')
+      return
+    }
+
+    await onSyncToEmr(buildChiefComplaintSyncPayload())
   }
 
   function handleSave() {

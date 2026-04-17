@@ -155,6 +155,8 @@ interface RecordingPageProps {
   onOpenPatientPicker?: () => void
   /** Opens patient sheet in “match” mode (same sheet, stored as matched patient). */
   onOpenMatchPatientPicker?: () => void
+  /** Optional callback for side effects when tapping the match patient CTA. */
+  onTapMatchPatient?: () => void
   /** Clears the current selected or matched patient for this visit (when idle or paused). */
   onDismissActivePatient?: () => void
 }
@@ -256,6 +258,7 @@ export function RecordingPage({
   onGenerateEMR,
   onOpenPatientPicker,
   onOpenMatchPatientPicker,
+  onTapMatchPatient,
   onDismissActivePatient,
 }: RecordingPageProps) {
   const [state, setState] = React.useState<RecordingState>('ready')
@@ -786,7 +789,10 @@ export function RecordingPage({
               </button>
               <button
                 type="button"
-                onClick={() => onOpenMatchPatientPicker?.()}
+                onClick={() => {
+                  onTapMatchPatient?.()
+                  onOpenMatchPatientPicker?.()
+                }}
                 className="w-full rounded-lg border border-dashed border-emerald-400/80 bg-emerald-50/70 p-4 text-center text-sm text-emerald-950 transition-colors hover:border-emerald-500 hover:bg-emerald-100/90 hover:text-emerald-950 dark:border-emerald-600 dark:bg-emerald-950/35 dark:text-emerald-50 dark:hover:border-emerald-500 dark:hover:bg-emerald-950/55"
               >
                 Tap to match a patient and attach this visit.

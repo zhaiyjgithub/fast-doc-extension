@@ -28,6 +28,43 @@ type AppPage =
   | 'patient-demographic'
   | 'provider'
 type SoapFlowPhase = 'idle' | 'generating' | 'success'
+type ExtractEmrDemographicsResponse = {
+  ok?: boolean
+  data?: {
+    profileId?: string
+    selectorMatched?: string
+    demographicsText?: string
+    sourceUrl?: string
+    sourcePath?: string
+    signalSummary?: {
+      score: number
+      matched: string[]
+      missing: string[]
+    }
+    textPreview?: string
+  }
+  error?: unknown
+}
+
+type SyncChiefComplaintPayload = {
+  chiefComplaintText: string
+  presentIllnessText: string
+  autoSave?: boolean
+  debug?: boolean
+  requestId?: string
+}
+
+const DEBUG_EMR_BRIDGE = true
+
+function logEmrDebug(scope: string, message: string, details?: unknown) {
+  if (!DEBUG_EMR_BRIDGE) return
+  const prefix = `[FastDoc][${scope}]`
+  if (details === undefined) {
+    console.log(`${prefix} ${message}`)
+  } else {
+    console.log(`${prefix} ${message}`, details)
+  }
+}
 
 const NAV_TABS: NavTab[] = [
   { id: 'home', label: 'Home', icon: <Home className="h-5 w-5" /> },
@@ -157,6 +194,88 @@ export default function App() {
     }
   }
 
+  const handleTapMatchPatient = React.useCallback(async () => {
+    const requestId = `demographics-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    try {
+      logEmrDebug('sidepanel', 'start demographics extraction', { requestId })
+      const result = (await browser.runtime.sendMessage({
+        type: 'FD_EXTRACT_EMR_DEMOGRAPHICS',
+        payload: { debug: DEBUG_EMR_BRIDGE, requestId },
+      })) as ExtractEmrDemographicsResponse
+
+      logEmrDebug('sidepanel', 'received demographics response', { requestId, result })
+      if (result == null) {
+        logEmrDebug('sidepanel', 'no response: likely stale background/content script, reload extension + refresh target tab', {
+          requestId,
+        })
+        toast.warning('Could not extract demographics from the active page')
+        return
+      }
+
+      if (result?.ok) {
+        const demographics = result.data ?? {}
+        logEmrDebug('sidepanel', 'demographics html payload', {
+          requestId,
+          profileId: demographics.profileId,
+          selectorMatched: demographics.selectorMatched,
+          sourceUrl: demographics.sourceUrl,
+          sourcePath: demographics.sourcePath,
+          signalSummary: demographics.signalSummary,
+          textPreview: demographics.textPreview,
+          demographicsText: demographics.demographicsText,
+        })
+        console.log('[FastDoc] Demographics section text:', demographics.demographicsText ?? '')
+        toast.success('Demographics section text captured and printed in console')
+      } else {
+        const errorMessage =
+          typeof result?.error === 'string' ? result.error : 'Patient demographics section not found'
+        toast.warning(errorMessage)
+      }
+    } catch (error) {
+      logEmrDebug('sidepanel', 'demographics extraction threw error', { requestId, error })
+      const errorMessage = error instanceof Error ? error.message : 'Failed to extract demographics'
+      toast.warning(errorMessage)
+    }
+  }, [])
+
+  const handleSyncSoapToEmr = React.useCallback(async (payload: SyncChiefComplaintPayload) => {
+    const requestId = `sync-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    try {
+      logEmrDebug('sidepanel', 'start sync chief complaint', {
+        requestId,
+        chiefLength: (payload.chiefComplaintText ?? '').length,
+        hpiLength: (payload.presentIllnessText ?? '').length,
+        autoSave: payload.autoSave ?? false,
+      })
+
+      const result = (await browser.runtime.sendMessage({
+        type: 'FD_SYNC_EMR_CHIEF_COMPLAINT',
+        payload: {
+          ...payload,
+          autoSave: payload.autoSave === true,
+          debug: DEBUG_EMR_BRIDGE,
+          requestId,
+        },
+      })) as { ok?: boolean; error?: unknown } | null
+
+      logEmrDebug('sidepanel', 'received sync response', { requestId, result })
+
+      if (result?.ok) {
+        toast.success('Synced SOAP summary to EMR chief complaint')
+        return
+      }
+
+      const errorMessage =
+        typeof result?.error === 'string'
+          ? result.error
+          : 'Could not sync to EMR from this page'
+      toast.warning(errorMessage)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to sync EMR chief complaint'
+      toast.warning(errorMessage)
+    }
+  }, [])
+
   const PAGE_TITLES: Record<AppPage, string> = {
     home: 'FastDoc',
     notes: 'Notes',
@@ -223,13 +342,18 @@ export default function App() {
             onGenerateEMR={handleGenerateEMR}
             onOpenPatientPicker={() => openPatientSheet('select')}
             onOpenMatchPatientPicker={() => openPatientSheet('match')}
+            onTapMatchPatient={handleTapMatchPatient}
             onDismissActivePatient={handleDismissActiveRecordingPatient}
           />
         )}
         {currentPage === 'soap' && soapFlowPhase === 'generating' && <SoapGeneratingPage />}
         {currentPage === 'soap' && soapFlowPhase === 'success' && <SoapSuccessPage />}
         {currentPage === 'soap' && soapFlowPhase === 'idle' && (
-          <SoapPage patient={patient} onOpenPatientPicker={() => openPatientSheet('select')} />
+          <SoapPage
+            patient={patient}
+            onOpenPatientPicker={() => openPatientSheet('select')}
+            onSyncToEmr={handleSyncSoapToEmr}
+          />
         )}
         {currentPage === 'settings' && (
           <SettingsPage
