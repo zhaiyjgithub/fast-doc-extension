@@ -15,6 +15,41 @@
 - **Content script**：`allFrames: true`，仅 **top frame** 统一处理 sync，避免多 frame 同时 `sendResponse` 竞态。
 - **权限**：`tabs` + 足够 `host_permissions`（如 `<all_urls>` 或 MDLand 域名），否则无法访问目标 frame。
 
+## FastDoc 原方案 vs DocPro 方案：对比与「为什么原方案不行」
+
+下面「原方案」指对齐 DocPro 之前，FastDoc 在 eClinic 上采用的主流做法：**在已打开的 `ov_ChiefComplaint.aspx` 子 frame 或 `officevisit_Spec` 展示层上直接改 DOM，再猜保存函数/按钮**。
+
+### 对照表
+
+| 维度 | FastDoc 原方案（未对齐前） | DocPro 观察到的方案（现 FastDoc `mdland-docpro` 路径） |
+|------|-----------------------------|--------------------------------------------------------|
+| **脚本主上下文** | 常从 **top** 遍历到 `ov_ChiefComplaint.aspx` 或只改 OfficeVisit **展示 div** | 以 **`ov_doctor_spec.aspx`** 该 frame 的 `document` 为锚点（与 EMR 外壳一致） |
+| **如何进入「可编辑」Chief** | 假设用户已打开 editor，或直接写 `body` / `innerHTML` | 先走 **`MenuFrame` → `#menu_span_chiefcomplaint`**，与人工点菜单一致 |
+| **写入目标** | 富文本 iframe 的 **`body`**，或外层 `#div_*_view` 的 `textContent` | 内层 **`chiefComplaint_ifr` / `presentIllness_ifr`** 文档里的 **`#tinymce`** |
+| **写入方式** | `innerHTML` / `textContent` + 自行 `dispatchEvent` | **`DOMParser` + `replaceChildren`**（等价 DocPro 内联 `d()`），贴近 TinyMCE 预期 DOM |
+| **工具栏/状态** | 一般不调 EMR 自带按钮 | **双击 `chiefComplaint_bold` / `presentIllness_bold`**，与页面内建行为一致 |
+| **保存** | 调 `saveIt()`、点 `#SavePage`、`saveAction`、`form.submit` 等「猜」 | 先 **`#procbarTDOfficeVisit`**，再用 **`#SavePage` visibility** 决定是否二次点击 procbar，避开模板保存 |
+| **多 workarea** | 易命中 **第一个** `ov_doctor_spec` / 错误 `workarea` 的 Save | 对多个 `ov_doctor_spec` 排序重试（如优先 `workarea1`） |
+
+### 为什么原方案「能看见字」却不行（核心原因）
+
+1. **上下文不在 EMR 设计的主状态机里**  
+   Chief 的「真编辑区」在 DocPro 路径里是通过 **菜单 + `chiefComplaint` iframe 链** 打开的；直接在 **`ov_ChiefComplaint.aspx` 子文档**里改 `body`，或只改 OfficeVisit **只读展示节点**，往往 **不经过** EMR 内部「已修改 / 可提交」的同一条链路，结果是：**界面有字，Save 不认或点了无反应**。
+
+2. **写错 DOM 节点（`body` vs `#tinymce`）**  
+   TinyMCE 类编辑器依赖 **`#tinymce` 容器子节点** 与编辑器实例同步；只改外层 iframe `body` 或整块 `innerHTML`，容易出现 **编辑器内核状态与 DOM 脱节**，表现为保存无效、甚至 **Save 按钮像被锁住**（页面仍按「未安全变更」或错误模态处理）。
+
+3. **保存动作在「错误的 frame / workarea」上触发**  
+   多 iframe 下 `saveIt`、`#SavePage` 可能属于 **另一 `workarea`** 或 **全局模板** 流程；一旦点错，会打开 **Save Template** 等弹层，打断 Chief 保存，并让用户感觉 **顶部 Save 失效**。
+
+4. **过度「帮用户解锁」Save 反而破坏原生逻辑**  
+   曾尝试改 `disabled`、`pointer-events`、强行关弹层等，会 **与 EMR 自己的锁定/遮罩状态冲突**，加剧「点 Save 没反应」的假象；最小干预（对齐 DocPro：少动按钮属性、走 procbar 序列）更稳。
+
+5. **与 DocPro 的注入面不一致**  
+   DocPro 的 MDLand 规则是 **`ov_doctor_spec.aspx` + `allFrames`**；原方案若只在 **子 editor URL** 上操作，缺少与 **同一 `document` 下 `MenuFrame`、`procbarTDOfficeVisit`** 的协同，保存与导航天然弱一档。
+
+**结论：** 原方案失败，不是因为「不能用 content script」，而是因为 **没有复现 eClinic 期望的「导航 → tinymce 写入 → procbar/SavePage 守卫」这条业务链**；对齐 DocPro 序列本质是 **对齐 EMR 前端状态机**，而不是单纯「找到一段 HTML 改掉」。
+
 ## 实现过程（按时间线）
 
 ### 1. 桥接与侧栏
