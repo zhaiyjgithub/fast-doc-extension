@@ -1,3 +1,20 @@
+import { tryMdlandOfficeVisitChiefSync } from './content-strategies/chief-officevisit';
+import {
+  closeGlobalTemplatePopup,
+  dispatchInputEvents,
+  invokeInlineHandlerInPageContext,
+  markChiefComplaintModified,
+  setMultilineContent,
+} from './content-strategies/chief-save-utils';
+import { extractEmrDemographicsFromTargets } from './content-strategies/demographics';
+import { getWorkareaTokenFromPath, isMdlandEclinicHost } from './content-strategies/shared';
+import type {
+  ExtractDemographicsResponse,
+  SearchTarget,
+  SyncChiefComplaintPayload,
+  SyncChiefComplaintResponse,
+} from './content-strategies/types';
+
 export default defineContentScript({
   matches: ['*://*/*'],
   allFrames: true,
@@ -12,50 +29,9 @@ export default defineContentScript({
       | { ok: true; data: ExtractPageData }
       | { ok: false; error: string };
 
-    type ExtractDemographicsData = {
-      profileId: string;
-      selectorMatched: string;
-      demographicsText: string;
-      sourceUrl?: string;
-      sourcePath?: string;
-      signalSummary?: {
-        score: number;
-        matched: string[];
-        missing: string[];
-      };
-      textPreview?: string;
-    };
-
-    type ExtractDemographicsResponse =
-      | { ok: true; data: ExtractDemographicsData }
-      | { ok: false; error: string };
-
-    type SyncChiefComplaintPayload = {
-      chiefComplaintText: string;
-      presentIllnessText: string;
-      autoSave?: boolean;
-    };
-
-    type SyncChiefComplaintResponse =
-      | {
-          ok: true;
-          strategy?: string;
-          sourceUrl?: string;
-          sourcePath?: string;
-          note?: string;
-          diagnostics?: unknown;
-        }
-      | { ok: false; error: string };
-
     type RuntimeMessage = {
       type?: string;
-      payload?: SyncChiefComplaintPayload & { debug?: boolean; requestId?: string };
-    };
-
-    type SearchTarget = {
-      doc: Document;
-      path: string;
-      sourceUrl: string;
+      payload?: SyncChiefComplaintPayload;
     };
 
     const MAX_TEXT_LENGTH = 20_000;
@@ -102,10 +78,6 @@ export default defineContentScript({
       }
     }
 
-    function escapeRegExp(value: string): string {
-      return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
     type EmrDomProfile = {
       id: string;
       hostPatterns: RegExp[];
@@ -142,16 +114,6 @@ export default defineContentScript({
         profile.hostPatterns.some((pattern) => pattern.test(hostname)),
       );
       return matched ?? EMR_DOM_PROFILES[0];
-    }
-
-    function queryFirstElement(selectors: string[]): HTMLElement | null {
-      for (const selector of selectors) {
-        const node = document.querySelector(selector);
-        if (node instanceof HTMLElement) {
-          return node;
-        }
-      }
-      return null;
     }
 
     function queryFirstElementInDoc(doc: Document, selectors: string[]): HTMLElement | null {
@@ -229,375 +191,25 @@ export default defineContentScript({
     }
 
     function extractEmrDemographics(message: RuntimeMessage): ExtractDemographicsResponse {
-      try {
-        type FeatureSignal = {
-          key: string;
-          pattern: RegExp;
-        };
+      const rootWindow = window.top ?? window;
+      const mergedTargets = mergeSearchTargets(
+        collectSameOriginDocs(document, 'top-dom'),
+        collectSameOriginDocsFromWindowTree(rootWindow, 'top-window'),
+      );
 
-        function hasDemographicsMarker(doc: Document): boolean {
-          if (doc.getElementById('PatientDemographics') != null) return true;
-          if (doc.querySelector('#div_patientinfo, #patientinfo') != null) return true;
-          const bodyText = doc.body?.innerText ?? '';
-          return /patient demographics/i.test(bodyText);
-        }
+      const response = extractEmrDemographicsFromTargets({
+        hostname: window.location.hostname,
+        targets: mergedTargets,
+        isElementNode,
+        logDebug: (stage, details) => logContentDebug(message, stage, details),
+      });
 
-        const FEATURE_SIGNALS: FeatureSignal[] = [
-          { key: 'name', pattern: /\bName\s*:\s*/i },
-          { key: 'dob', pattern: /\bDOB\s*:\s*\d{1,2}\/\d{1,2}\/\d{4}\b/i },
-          { key: 'age', pattern: /\bAge\s*:\s*\d+\s*y?\b/i },
-          { key: 'gender', pattern: /\bGender\s*:\s*(Male|Female|Other)\b/i },
-          { key: 'patientId', pattern: /\bPatient\s*ID\s*:\s*\d+\b/i },
-          { key: 'address', pattern: /\bAddress\s*:\s*/i },
-          { key: 'phone', pattern: /\bPhone\s*:\s*/i },
-          { key: 'email', pattern: /\bEmail\s*:\s*[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}\b/i },
-        ];
-
-        function evaluateFeatureSignals(doc: Document): {
-          score: number;
-          matched: string[];
-          missing: string[];
-          normalizedText: string;
-        } {
-          const normalizedText = (doc.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
-          const matched: string[] = [];
-          const missing: string[] = [];
-
-          for (const signal of FEATURE_SIGNALS) {
-            if (signal.pattern.test(normalizedText)) {
-              matched.push(signal.key);
-            } else {
-              missing.push(signal.key);
-            }
-          }
-
-          return {
-            score: matched.length,
-            matched,
-            missing,
-            normalizedText,
-          };
-        }
-
-        function getDemographicsSectionText(doc: Document): { text: string; selector: string } | null {
-          function normalizeText(value: string): string {
-            return value.replace(/\s+/g, ' ').trim();
-          }
-
-          function sliceDemographicsWindow(value: string): string {
-            const normalized = normalizeText(value);
-            if (!normalized) return '';
-
-            const startLabel = 'Patient Demographics';
-            const endLabel = 'Chief Complaint';
-            const startIdx = normalized.toLowerCase().indexOf(startLabel.toLowerCase());
-            const endIdx = normalized.toLowerCase().indexOf(endLabel.toLowerCase());
-
-            if (startIdx >= 0 && endIdx > startIdx) {
-              return normalized.slice(startIdx, endIdx).trim();
-            }
-            if (startIdx >= 0) {
-              return normalized.slice(startIdx).trim();
-            }
-            return normalized;
-          }
-
-          const sectionById = doc.querySelector('#PatientDemographics');
-          if (sectionById instanceof HTMLElement) {
-            const text = sliceDemographicsWindow(sectionById.innerText);
-            if (text) return { text, selector: '#PatientDemographics' };
-          }
-
-          const sectionByContainer = doc.querySelector('#div_patientinfo');
-          if (sectionByContainer instanceof HTMLElement) {
-            const text = sliceDemographicsWindow(sectionByContainer.innerText);
-            if (text) return { text, selector: '#div_patientinfo' };
-          }
-
-          const titleCell = Array.from(doc.querySelectorAll('td, b, span')).find((node) =>
-            /patient demographics/i.test(node.textContent ?? ''),
-          );
-          if (titleCell instanceof HTMLElement) {
-            const closestBlock =
-              titleCell.closest('#table_patientinfo, #div_patientinfo, table, tr, td, div');
-            if (closestBlock instanceof HTMLElement) {
-              const text = sliceDemographicsWindow(closestBlock.innerText);
-              if (text) return { text, selector: 'closest(patient-demographics-title)' };
-            }
-          }
-
-          // Last resort: split full document text between known section labels.
-          const fallbackWindow = sliceDemographicsWindow(doc.body?.innerText ?? '');
-          if (fallbackWindow) {
-            return { text: fallbackWindow, selector: 'document-body-window' };
-          }
-
-          return null;
-        }
-
-        const targets = collectSameOriginDocs(document, 'top');
-        const scoredTargets = targets.map((target) => {
-          const signal = evaluateFeatureSignals(target.doc);
-          const demographicsSection = getDemographicsSectionText(target.doc);
-          return { target, signal, demographicsSection };
-        });
-
-        const officeVisitWithSection =
-          scoredTargets.find(
-            ({ target, demographicsSection }) =>
-              /\/eClinic\/officevisit_Spec\.aspx/i.test(target.sourceUrl) &&
-              demographicsSection != null,
-          ) ?? null;
-
-        const bestSectionBySignal =
-          [...scoredTargets]
-            .filter(({ demographicsSection }) => demographicsSection != null)
-            .sort((left, right) => right.signal.score - left.signal.score)[0] ?? null;
-
-        const markerMatchedWithSection =
-          scoredTargets.find(
-            ({ target, demographicsSection }) =>
-              demographicsSection != null && hasDemographicsMarker(target.doc),
-          ) ?? null;
-
-        const highestSignalTarget =
-          [...scoredTargets].sort((left, right) => right.signal.score - left.signal.score)[0] ?? null;
-        const matchedWithSection = officeVisitWithSection ?? bestSectionBySignal ?? markerMatchedWithSection;
-        const fallbackTarget = highestSignalTarget ?? scoredTargets[0] ?? null;
-        if (!fallbackTarget) {
-          return { ok: false, error: 'No accessible document/frame found' };
-        }
-
-        const selected = matchedWithSection ?? fallbackTarget;
-        const fullPageHtml = selected.target.doc.documentElement?.outerHTML ?? '';
-        if (!fullPageHtml) {
-          return { ok: false, error: 'Could not read HTML from selected document/frame' };
-        }
-        const textPreview = selected.signal.normalizedText.slice(0, 800);
-        const demographicsSection = selected.demographicsSection;
-        const demographicsText = demographicsSection?.text ?? selected.signal.normalizedText;
-        const demographicsSelector = demographicsSection?.selector ?? 'fallback:document-body-text';
-
-        logContentDebug(message, 'html captured from document/frame', {
-          htmlLength: fullPageHtml.length,
-          sourceUrl: selected.target.sourceUrl,
-          sourcePath: selected.target.path,
-          totalDocsScanned: targets.length,
-          officeVisitFrameDetected: officeVisitWithSection != null,
-          markerMatched: markerMatchedWithSection != null,
-          signalScore: selected.signal.score,
-          matchedSignals: selected.signal.matched,
-          missingSignals: selected.signal.missing,
-          textPreview,
-          demographicsSelector,
-          demographicsTextLength: demographicsText.length,
-          usedFallbackText: demographicsSection == null,
-        });
-
-        lastDemographicsSourceUrl = selected.target.sourceUrl;
-        lastDemographicsSourcePath = selected.target.path;
-
-        return {
-          ok: true,
-          data: {
-            profileId: 'full-page',
-            selectorMatched: demographicsSelector,
-            demographicsText,
-            sourceUrl: selected.target.sourceUrl,
-            sourcePath: selected.target.path,
-            signalSummary: {
-              score: selected.signal.score,
-              matched: selected.signal.matched,
-              missing: selected.signal.missing,
-            },
-            textPreview,
-          },
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to extract EMR demographics';
-        return { ok: false, error: message };
-      }
-    }
-
-    function dispatchInputEvents(target: HTMLElement): void {
-      const view = target.ownerDocument?.defaultView;
-      const eventCtor = view?.Event ?? Event;
-      const keyboardCtor = view?.KeyboardEvent ?? KeyboardEvent;
-      target.dispatchEvent(new eventCtor('input', { bubbles: true }));
-      target.dispatchEvent(new eventCtor('change', { bubbles: true }));
-      target.dispatchEvent(new keyboardCtor('keydown', { bubbles: true, key: 'a' }));
-      target.dispatchEvent(new keyboardCtor('keyup', { bubbles: true, key: 'a' }));
-      target.dispatchEvent(new eventCtor('blur', { bubbles: true }));
-    }
-
-    function setMultilineContent(target: HTMLElement, text: string): void {
-      const normalized = text.replace(/\r\n/g, '\n').trim();
-      target.textContent = normalized;
-      dispatchInputEvents(target);
-    }
-
-    function closeGlobalTemplatePopup(doc: Document): void {
-      const templatePopup = doc.getElementById('divGlobalTemplate');
-      if (isElementNode(templatePopup)) {
-        templatePopup.style.visibility = 'hidden';
-        templatePopup.style.display = 'none';
-      }
-    }
-
-    function markChiefComplaintModified(editorDoc: Document): void {
-      const windowsToTry: Window[] = [];
-      const editorWin = editorDoc.defaultView;
-      if (editorWin) {
-        windowsToTry.push(editorWin);
-        try {
-          if (editorWin.parent && editorWin.parent !== editorWin) windowsToTry.push(editorWin.parent);
-        } catch {
-          // ignore
-        }
-        try {
-          if (editorWin.top && editorWin.top !== editorWin) windowsToTry.push(editorWin.top);
-        } catch {
-          // ignore
-        }
+      if (response.ok) {
+        lastDemographicsSourceUrl = response.data.sourceUrl ?? null;
+        lastDemographicsSourcePath = response.data.sourcePath ?? null;
       }
 
-      for (const win of windowsToTry) {
-        const stateWin = win as Window & {
-          SetMenuModified?: (menuIndex: unknown, flagA: unknown, flagB: unknown) => unknown;
-          Menu_ChiefComplaint?: unknown;
-          chiefComplaint?: { modified?: unknown; loadAlready?: unknown };
-        };
-        try {
-          if (typeof stateWin.SetMenuModified === 'function' && stateWin.Menu_ChiefComplaint != null) {
-            stateWin.SetMenuModified(stateWin.Menu_ChiefComplaint, 0, 1);
-          }
-        } catch {
-          // ignore
-        }
-        try {
-          if (stateWin.chiefComplaint) {
-            stateWin.chiefComplaint.modified = 1;
-            stateWin.chiefComplaint.loadAlready = 1;
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    function getWorkareaTokenFromPath(path: string): string | null {
-      const matched = path.match(/workarea\d+/i);
-      return matched?.[0]?.toLowerCase() ?? null;
-    }
-
-    function invokeInlineHandlerInPageContext(target: Element, inlineHandler: string): boolean {
-      const doc = target.ownerDocument;
-      if (!doc || !inlineHandler.trim()) {
-        return false;
-      }
-      const host = doc.documentElement ?? doc.body;
-      if (!host) {
-        return false;
-      }
-
-      const marker = `fastdoc-save-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      target.setAttribute('data-fastdoc-save-marker', marker);
-      const script = doc.createElement('script');
-      script.textContent = `(() => {
-  try {
-    const el = document.querySelector('[data-fastdoc-save-marker="${marker}"]');
-    if (!el) return;
-    const code = el.getAttribute('onclick');
-    if (!code) return;
-    (new Function(code)).call(el);
-  } catch (_) {
-    // ignore
-  }
-})();`;
-      try {
-        host.appendChild(script);
-        return true;
-      } catch {
-        return false;
-      } finally {
-        script.remove();
-        target.removeAttribute('data-fastdoc-save-marker');
-      }
-    }
-
-    function syncEmrChiefComplaintInCurrentDoc(
-      payload: SyncChiefComplaintPayload | undefined,
-      message?: RuntimeMessage,
-    ): SyncChiefComplaintResponse {
-      try {
-        if (!payload) {
-          return { ok: false, error: 'Missing sync payload' };
-        }
-
-        const doc = document;
-        const demographics = doc.getElementById('PatientDemographics');
-        const complaintSection = doc.getElementById('div_chiefcomplaint');
-
-        // Hard-path for eClinic: same frame as demographics, update chief complaint view directly.
-        let chiefView = doc.getElementById('div_chiefComplaint_view');
-        if (!(chiefView instanceof HTMLElement) && complaintSection instanceof HTMLElement) {
-          const innerContainer = complaintSection.querySelector('div');
-          if (innerContainer instanceof HTMLElement) {
-            const created = doc.createElement('div');
-            created.id = 'div_chiefComplaint_view';
-            innerContainer.appendChild(created);
-            chiefView = created;
-          }
-        }
-        if (!(chiefView instanceof HTMLElement) && complaintSection instanceof HTMLElement) {
-          const created = doc.createElement('div');
-          created.id = 'div_chiefComplaint_view';
-          complaintSection.appendChild(created);
-          chiefView = created;
-        }
-
-        let hpiView = doc.getElementById('div_presentIllness_view');
-        if (!(hpiView instanceof HTMLElement) && complaintSection instanceof HTMLElement) {
-          const historyLabel = Array.from(
-            complaintSection.querySelectorAll('b, span, td, div'),
-          ).find((node) => /history\s*of\s*present\s*illness/i.test(node.textContent ?? ''));
-          if (historyLabel instanceof HTMLElement) {
-            const created = doc.createElement('div');
-            created.id = 'div_presentIllness_view';
-            historyLabel.insertAdjacentElement('afterend', created);
-            hpiView = created;
-          }
-        }
-
-        if (!(chiefView instanceof HTMLElement)) {
-          return {
-            ok: false,
-            error: `Chief complaint target not found in officevisit frame. url=${window.location.href}; hasDemographics=${demographics instanceof HTMLElement}; hasComplaintSection=${complaintSection instanceof HTMLElement}`,
-          };
-        }
-
-        setMultilineContent(chiefView, payload.chiefComplaintText ?? '');
-        if (hpiView instanceof HTMLElement && (payload.presentIllnessText ?? '').trim().length > 0) {
-          setMultilineContent(hpiView, payload.presentIllnessText ?? '');
-        }
-
-        logContentDebug(message ?? { type: 'FD_SYNC_EMR_CHIEF_COMPLAINT', payload }, 'chief complaint synced in officevisit frame', {
-          sourceUrl: window.location.href,
-          hasDemographics: demographics instanceof HTMLElement,
-          hasComplaintSection: complaintSection instanceof HTMLElement,
-          chiefLength: (payload.chiefComplaintText ?? '').length,
-          hpiLength: (payload.presentIllnessText ?? '').length,
-        });
-        return {
-          ok: true,
-          strategy: 'officevisit-current-doc',
-          sourceUrl: window.location.href,
-        };
-      } catch (error) {
-        const messageText =
-          error instanceof Error ? error.message : 'Failed to sync EMR chief complaint in current doc';
-        return { ok: false, error: messageText };
-      }
+      return response;
     }
 
     async function syncEmrChiefComplaint(
@@ -911,279 +523,6 @@ export default defineContentScript({
           const name = node.getAttribute('name') ?? '';
           const tag = node.tagName.toLowerCase();
           return `${tag}#${id}[name=${name}]`;
-        }
-
-        function isMdlandEclinicHost(hostname: string): boolean {
-          const h = hostname.toLowerCase();
-          return h.endsWith('.mdland.net') || h.endsWith('.mdland.com');
-        }
-
-        /**
-         * MDLand eClinic: align with DocPro-style navigation (ov_doctor_spec → MenuFrame →
-         * chiefComplaint iframe → chiefComplaint_ifr / presentIllness_ifr → #tinymce + replaceChildren).
-         * Reference behavior observed in DocPro mdland_officevisit_spec.js (same-origin only).
-         */
-        async function tryMdlandDoctorSpecDocProChiefSync(
-          targets: SearchTarget[],
-          payload: SyncChiefComplaintPayload,
-        ): Promise<SyncChiefComplaintResponse | null> {
-          const logMsg: RuntimeMessage = { type: 'FD_SYNC_EMR_CHIEF_COMPLAINT', payload };
-          const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-          const replaceTinyMceChildren = (el: HTMLElement | null, html: string): boolean => {
-            if (!el) return false;
-            const parsed = new DOMParser().parseFromString(html || '', 'text/html');
-            el.replaceChildren(...parsed.body.childNodes);
-            return true;
-          };
-
-          const plainTextToDocproHtml = (text: string): string => {
-            const normalized = text.replace(/\r\n/g, '\n').trim();
-            const inner = normalized
-              .split('\n')
-              .map((line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
-              .join('<br>');
-            return `<div>${inner}</div>`;
-          };
-
-          const doctorSpecs = targets
-            .filter((t) => /\/eClinic\/ov_doctor_spec\.aspx/i.test(t.sourceUrl))
-            .sort((a, b) => {
-              const wa = getWorkareaTokenFromPath(a.path);
-              const wb = getWorkareaTokenFromPath(b.path);
-              if (wa === 'workarea1' && wb !== 'workarea1') return -1;
-              if (wb === 'workarea1' && wa !== 'workarea1') return 1;
-              return 0;
-            });
-
-          logContentDebug(logMsg, 'mdland-docpro: start', {
-            doctorSpecFrames: doctorSpecs.slice(0, 6).map((t) => ({ path: t.path, url: t.sourceUrl })),
-            chiefLen: (payload.chiefComplaintText ?? '').length,
-            hpiLen: (payload.presentIllnessText ?? '').length,
-            autoSave: payload.autoSave === true,
-          });
-
-          if (doctorSpecs.length === 0) {
-            logContentDebug(logMsg, 'mdland-docpro: abort — no ov_doctor_spec in merged targets');
-            return null;
-          }
-
-          for (const spec of doctorSpecs) {
-            const doc = spec.doc;
-            const trace: string[] = [];
-
-            try {
-              let menuFrame: HTMLElement | null = null;
-              for (let s = 0; s < 10; s += 1) {
-                menuFrame = doc.getElementById('MenuFrame');
-                if (isElementNode(menuFrame)) break;
-                trace.push(`wait MenuFrame attempt=${s + 1}`);
-                await sleep(200);
-              }
-              if (!isElementNode(menuFrame)) {
-                logContentDebug(logMsg, 'mdland-docpro: frame skip — MenuFrame missing', {
-                  path: spec.path,
-                  trace,
-                });
-                continue;
-              }
-
-              const menuDoc =
-                (menuFrame as HTMLIFrameElement).contentDocument ??
-                (menuFrame as HTMLIFrameElement).contentWindow?.document ??
-                null;
-              if (!menuDoc) {
-                logContentDebug(logMsg, 'mdland-docpro: frame skip — MenuFrame document inaccessible', {
-                  path: spec.path,
-                });
-                continue;
-              }
-
-              const menuSpan = menuDoc.querySelector('#menu_span_chiefcomplaint');
-              if (!isElementNode(menuSpan)) {
-                logContentDebug(logMsg, 'mdland-docpro: frame skip — #menu_span_chiefcomplaint missing', {
-                  path: spec.path,
-                });
-                continue;
-              }
-
-              (menuSpan as HTMLElement).click();
-              trace.push('clicked #menu_span_chiefcomplaint');
-              logContentDebug(logMsg, 'mdland-docpro: menu click', { path: spec.path, trace: [...trace] });
-              await sleep(500);
-
-              let chiefOuter: HTMLElement | null = null;
-              for (let l = 0; l < 12; l += 1) {
-                chiefOuter =
-                  doc.getElementById('chiefComplaint') ??
-                  (doc.querySelector(
-                    'iframe#chiefComplaint, iframe[name="chiefComplaint"], frame#chiefComplaint, frame[name="chiefComplaint"]',
-                  ) as HTMLElement | null);
-                if (isElementNode(chiefOuter)) break;
-                trace.push(`wait chiefComplaint iframe attempt=${l + 1}`);
-                await sleep(200);
-              }
-              if (!isElementNode(chiefOuter)) {
-                logContentDebug(logMsg, 'mdland-docpro: frame skip — chiefComplaint iframe missing', {
-                  path: spec.path,
-                  trace,
-                });
-                continue;
-              }
-
-              const chiefDoc =
-                (chiefOuter as HTMLIFrameElement).contentDocument ??
-                (chiefOuter as HTMLIFrameElement).contentWindow?.document ??
-                null;
-              if (!chiefDoc) {
-                logContentDebug(logMsg, 'mdland-docpro: frame skip — chiefComplaint document inaccessible', {
-                  path: spec.path,
-                });
-                continue;
-              }
-              trace.push('entered chiefComplaint iframe document');
-              await sleep(400);
-
-              const chiefText = (payload.chiefComplaintText ?? '').trim();
-              if (chiefText.length > 0) {
-                let innerFr: HTMLElement | null = null;
-                for (let p = 0; p < 18; p += 1) {
-                  innerFr = chiefDoc.getElementById('chiefComplaint_ifr');
-                  if (isElementNode(innerFr)) break;
-                  trace.push(`wait chiefComplaint_ifr attempt=${p + 1}`);
-                  await sleep(200);
-                }
-                if (!isElementNode(innerFr)) {
-                  logContentDebug(logMsg, 'mdland-docpro: frame skip — chiefComplaint_ifr missing', {
-                    path: spec.path,
-                    trace,
-                  });
-                  continue;
-                }
-                const innerDoc =
-                  (innerFr as HTMLIFrameElement).contentDocument ??
-                  (innerFr as HTMLIFrameElement).contentWindow?.document ??
-                  null;
-                if (!innerDoc) {
-                  logContentDebug(logMsg, 'mdland-docpro: frame skip — chiefComplaint_ifr document inaccessible', {
-                    path: spec.path,
-                  });
-                  continue;
-                }
-                await sleep(300);
-                const chiefBold = chiefDoc.getElementById('chiefComplaint_bold');
-                if (isElementNode(chiefBold)) {
-                  chiefBold.click();
-                  await sleep(80);
-                  chiefBold.click();
-                  trace.push('double-click chiefComplaint_bold');
-                }
-                const tiny = innerDoc.getElementById('tinymce');
-                const html = plainTextToDocproHtml(chiefText);
-                const wrote = replaceTinyMceChildren(tiny, html);
-                trace.push(`chief tinymce write ok=${wrote} node=${tiny ? describeNode(tiny) : 'null'}`);
-                try {
-                  const tw = innerDoc.defaultView as Window & {
-                    tinymce?: { triggerSave?: () => void; editors?: unknown[] };
-                    tinyMCE?: { triggerSave?: () => void };
-                  };
-                  tw?.tinymce?.triggerSave?.();
-                  tw?.tinyMCE?.triggerSave?.();
-                } catch {
-                  // ignore
-                }
-              }
-
-              const hpiText = (payload.presentIllnessText ?? '').trim();
-              if (hpiText.length > 0) {
-                let hpiFr: HTMLElement | null = null;
-                for (let m = 0; m < 14; m += 1) {
-                  hpiFr = chiefDoc.getElementById('presentIllness_ifr');
-                  if (isElementNode(hpiFr)) break;
-                  trace.push(`wait presentIllness_ifr attempt=${m + 1}`);
-                  await sleep(200);
-                }
-                if (isElementNode(hpiFr)) {
-                  const hpiDoc =
-                    (hpiFr as HTMLIFrameElement).contentDocument ??
-                    (hpiFr as HTMLIFrameElement).contentWindow?.document ??
-                    null;
-                  if (hpiDoc) {
-                    await sleep(300);
-                    const hpiBold = chiefDoc.getElementById('presentIllness_bold');
-                    if (isElementNode(hpiBold)) {
-                      hpiBold.click();
-                      await sleep(80);
-                      hpiBold.click();
-                      trace.push('double-click presentIllness_bold');
-                    }
-                    const tinyH = hpiDoc.getElementById('tinymce');
-                    const htmlH = plainTextToDocproHtml(hpiText);
-                    const wroteH = replaceTinyMceChildren(tinyH, htmlH);
-                    trace.push(`hpi tinymce write ok=${wroteH} node=${tinyH ? describeNode(tinyH) : 'null'}`);
-                    try {
-                      const tw = hpiDoc.defaultView as Window & { tinymce?: { triggerSave?: () => void } };
-                      tw?.tinymce?.triggerSave?.();
-                    } catch {
-                      // ignore
-                    }
-                  }
-                }
-              }
-
-              logContentDebug(logMsg, 'mdland-docpro: writes complete', {
-                path: spec.path,
-                url: spec.sourceUrl,
-                trace,
-              });
-
-              if (payload.autoSave === true) {
-                await sleep(500);
-                const proc = doc.querySelector('#procbarTDOfficeVisit');
-                logContentDebug(logMsg, 'mdland-docpro: autoSave — procbarTDOfficeVisit first click', {
-                  hasProc: !!proc,
-                  path: spec.path,
-                });
-                (proc as HTMLElement | undefined)?.click?.();
-                await sleep(500);
-                const savePage = doc.querySelector('#SavePage');
-                let saveVis = '';
-                if (isElementNode(savePage) && doc.defaultView) {
-                  saveVis = doc.defaultView.getComputedStyle(savePage).visibility;
-                }
-                logContentDebug(logMsg, 'mdland-docpro: autoSave — SavePage visibility', {
-                  visibility: saveVis,
-                  path: spec.path,
-                });
-                if (saveVis !== 'hidden') {
-                  (doc.querySelector('#procbarTDOfficeVisit') as HTMLElement | undefined)?.click?.();
-                  trace.push('second procbarTDOfficeVisit click (SavePage visible)');
-                }
-                logContentDebug(logMsg, 'mdland-docpro: autoSave sequence done', { path: spec.path, trace });
-              }
-
-              return {
-                ok: true,
-                strategy: 'mdland-docpro:ov_doctor_spec',
-                sourceUrl: spec.sourceUrl,
-                sourcePath: spec.path,
-                note:
-                  payload.autoSave === true
-                    ? 'mdland docpro path: write + autoSave(procbar/SavePage guard)'
-                    : 'mdland docpro path: write only (manual Save)',
-                diagnostics: { trace },
-              };
-            } catch (err) {
-              logContentDebug(logMsg, 'mdland-docpro: frame error', {
-                path: spec.path,
-                error: err instanceof Error ? err.message : String(err),
-                trace,
-              });
-            }
-          }
-
-          logContentDebug(logMsg, 'mdland-docpro: all ov_doctor_spec attempts failed — falling back');
-          return null;
         }
 
         function primeDocForSaveSubmit(doc: Document): void {
@@ -1812,9 +1151,18 @@ export default defineContentScript({
         }
 
         if (isMdlandEclinicHost(window.location.hostname)) {
-          const docProResult = await tryMdlandDoctorSpecDocProChiefSync(initialTargets, payload);
-          if (docProResult != null) {
-            return docProResult;
+          const officeVisitResult = await tryMdlandOfficeVisitChiefSync({
+            targets: initialTargets,
+            payload,
+            helpers: {
+              isElementNode,
+              describeNode,
+              logDebug: (stage, details) =>
+                logContentDebug({ type: 'FD_SYNC_EMR_CHIEF_COMPLAINT', payload }, stage, details),
+            },
+          });
+          if (officeVisitResult != null) {
+            return officeVisitResult;
           }
         }
 
