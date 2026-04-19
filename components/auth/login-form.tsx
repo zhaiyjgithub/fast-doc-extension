@@ -16,6 +16,9 @@ const labelClass =
 const inputShellClass =
   'h-auto border-0 bg-muted py-4 pl-12 pr-4 text-base shadow-none transition-all placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring'
 
+// Testing stage default OTP for the security-code step.
+const DEMO_SECURITY_CODE = '123456'
+
 function maskEmailForDisplay(raw: string): string {
   const t = raw.trim()
   if (!t.includes('@')) return t || 'your email'
@@ -30,13 +33,13 @@ export function LoginForm({ onLogin, isLoading = false }: LoginFormProps) {
   const [username, setUsername] = React.useState('schen@emr.local')
   const [password, setPassword] = React.useState('Doctor@2026!')
   const [showPassword, setShowPassword] = React.useState(false)
-  const [otp, setOtp] = React.useState('')
+  const [otp, setOtp] = React.useState(DEMO_SECURITY_CODE)
   const [otpError, setOtpError] = React.useState('')
   const [sendingCode, setSendingCode] = React.useState(false)
 
   function resetToCredentials() {
     setStep('credentials')
-    setOtp('')
+    setOtp(DEMO_SECURITY_CODE)
     setOtpError('')
     setSendingCode(false)
   }
@@ -48,8 +51,9 @@ export function LoginForm({ onLogin, isLoading = false }: LoginFormProps) {
     window.setTimeout(() => {
       setSendingCode(false)
       setStep('email2fa')
+      setOtp(DEMO_SECURITY_CODE)
       toast.message('Security code sent (demo)', {
-        description: `Use any 6-digit code to continue. We would email ${maskEmailForDisplay(username)}.`,
+        description: `Default code is ${DEMO_SECURITY_CODE}. We would email ${maskEmailForDisplay(username)}.`,
       })
     }, 700)
   }

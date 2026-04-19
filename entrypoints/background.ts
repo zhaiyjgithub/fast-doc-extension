@@ -12,9 +12,18 @@ export default defineBackground(() => {
   };
 
   type RelayTarget = {
-    contentType: 'FD_EXTRACT_ACTIVE_PAGE' | 'FD_EXTRACT_EMR_DEMOGRAPHICS' | 'FD_SYNC_EMR_CHIEF_COMPLAINT';
+    contentType:
+      | 'FD_EXTRACT_ACTIVE_PAGE'
+      | 'FD_EXTRACT_EMR_DEMOGRAPHICS'
+      | 'FD_SYNC_EMR_CHIEF_COMPLAINT';
     payload?: RuntimeMessage['payload'];
   };
+
+  function isRestrictedTabUrl(url: string): boolean {
+    return /^(about:|chrome:|edge:|brave:|vivaldi:|opera:|moz-extension:|chrome-extension:|extension:)/i.test(
+      url,
+    );
+  }
 
   function getRelayTarget(message: RuntimeMessage): RelayTarget | null {
     if (message.type === 'FD_SCRAPE_ACTIVE_TAB') {
@@ -66,7 +75,9 @@ export default defineBackground(() => {
 
     void (async () => {
       try {
-        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+        const [focusedTab] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+        const [currentWindowTab] = await browser.tabs.query({ active: true, currentWindow: true });
+        const activeTab = focusedTab ?? currentWindowTab;
         logBridgeDebug(message, 'active tab resolved', {
           id: activeTab?.id,
           url: activeTab?.url,
@@ -77,9 +88,12 @@ export default defineBackground(() => {
           return;
         }
 
-        const activeUrl = activeTab.url ?? '';
-        if (!/^https?:\/\//i.test(activeUrl)) {
-          sendResponse({ ok: false, error: 'Unsupported tab URL' });
+        const activeUrl = activeTab.url;
+        if (typeof activeUrl === 'string' && activeUrl.length > 0 && isRestrictedTabUrl(activeUrl)) {
+          sendResponse({
+            ok: false,
+            error: 'Active tab is a browser/internal page. Please switch to the MDLand tab and try again.',
+          });
           return;
         }
 
@@ -98,6 +112,14 @@ export default defineBackground(() => {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to message active tab';
         logBridgeDebug(message, 'relay failed with exception', { errorMessage, error });
+        if (typeof errorMessage === 'string' && /receiving end does not exist|could not establish connection/i.test(errorMessage)) {
+          sendResponse({
+            ok: false,
+            error: 'Could not reach page script. Please focus a loaded MDLand eClinic tab and try again.',
+          });
+          return;
+        }
+
         sendResponse({ ok: false, error: errorMessage });
       }
     })();
