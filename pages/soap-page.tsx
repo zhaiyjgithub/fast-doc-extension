@@ -22,10 +22,12 @@ import {
   ChevronUp,
   Code2,
   Copy,
-  Download,
+  FileText,
+  RefreshCw,
   MoreHorizontal,
   Pencil,
   Sparkles,
+  Zap,
 } from 'lucide-react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { toast } from 'sonner'
@@ -193,7 +195,7 @@ function formatDob(iso: string) {
 
 const fabCopyExport = [
   { icon: Copy, label: 'Copy', action: 'copy' as const },
-  { icon: Download, label: 'Export', action: 'export' as const },
+  { icon: RefreshCw, label: 'Sync', action: 'sync' as const },
 ] as const
 
 type ClinicalCodeDetail = { kind: 'icd'; row: IcdFinding } | { kind: 'cpt'; row: CptFinding }
@@ -412,11 +414,11 @@ function ClinicalCodeDetailDialog({
 
 function SoapFabMenu({
   onCopy,
-  onExport,
+  onSync,
   onEdit,
 }: {
   onCopy: () => void
-  onExport: () => void
+  onSync: () => void
   onEdit: () => void
 }) {
   const [open, setOpen] = React.useState(false)
@@ -426,10 +428,10 @@ function SoapFabMenu({
     [],
   )
 
-  function handleAction(action: 'copy' | 'export' | 'edit') {
+  function handleAction(action: 'copy' | 'sync' | 'edit') {
     setOpen(false)
     if (action === 'copy') onCopy()
-    else if (action === 'export') onExport()
+    else if (action === 'sync') onSync()
     else onEdit()
   }
 
@@ -496,6 +498,81 @@ function SoapFabMenu({
   )
 }
 
+function SyncTransferOverlay({ open }: { open: boolean }) {
+  return (
+    <AnimatePresence>
+      {open ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm"
+          aria-live="polite"
+          aria-label="Sync in progress"
+        >
+          <motion.div
+            initial={{ y: 12, scale: 0.98, opacity: 0 }}
+            animate={{ y: 0, scale: 1, opacity: 1 }}
+            exit={{ y: 10, scale: 0.99, opacity: 0 }}
+            transition={{ duration: 0.24, ease: 'easeOut' }}
+            className="w-full max-w-md rounded-2xl border border-border/70 bg-card/95 px-5 py-5 shadow-xl"
+          >
+            <div className="mb-4 flex items-center justify-center">
+              <motion.span
+                animate={{ opacity: [0.55, 1, 0.55] }}
+                transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+                className="text-sm font-semibold text-foreground"
+              >
+                Syncing...
+              </motion.span>
+            </div>
+
+            <div className="relative h-24 overflow-hidden rounded-xl border border-border/50 bg-muted/35 px-4">
+              <div className="relative flex h-full items-center justify-between">
+                <div className="z-10 flex flex-col items-center gap-1.5">
+                  <motion.div
+                    className="flex size-10 items-center justify-center rounded-full border border-primary/40 bg-primary/15 text-primary"
+                    animate={{ scale: [1, 1.05, 1] }}
+                    transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    <FileText className="size-5" aria-hidden />
+                  </motion.div>
+                  <span className="text-[11px] font-semibold tracking-wide text-foreground/90">EMR</span>
+                </div>
+
+                <div className="z-10 flex flex-col items-center gap-1.5">
+                  <motion.div
+                    className="flex size-10 items-center justify-center rounded-xl bg-primary shadow-md shadow-primary/25"
+                    animate={{ scale: [1, 1.05, 1] }}
+                    transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
+                  >
+                    <Zap className="size-5 text-primary-foreground" aria-hidden />
+                  </motion.div>
+                  <span className="text-[11px] font-semibold tracking-wide text-foreground/90">FastDoc</span>
+                </div>
+              </div>
+
+              <div className="pointer-events-none absolute inset-x-16 top-[42%] h-1 -translate-y-1/2 overflow-hidden rounded-full bg-primary/20">
+                <motion.div
+                  className="h-full bg-primary/60"
+                  animate={{ x: ['100%', '0%', '-100%'] }}
+                  transition={{ duration: 1.15, repeat: Infinity, ease: 'linear' }}
+                />
+              </div>
+
+              <motion.div
+                className="pointer-events-none absolute top-[42%] size-3 -translate-y-1/2 rounded-full bg-primary shadow-[0_0_14px_rgba(99,102,241,0.85)]"
+                animate={{ left: ['84%', '16%'] }}
+                transition={{ duration: 1.35, repeat: Infinity, ease: 'linear' }}
+              />
+            </div>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  )
+}
+
 export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPageProps) {
   const [expanded, setExpanded] = React.useState<Record<SectionId, boolean>>(() =>
     Object.fromEntries(SECTIONS.map((s) => [s.id, true])) as Record<SectionId, boolean>,
@@ -505,6 +582,7 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
   )
   const [isEditing, setIsEditing] = React.useState(false)
   const [codeDetail, setCodeDetail] = React.useState<ClinicalCodeDetail | null>(null)
+  const [isSyncAnimating, setIsSyncAnimating] = React.useState(false)
 
   const allExpanded = SECTIONS.every((s) => expanded[s.id])
 
@@ -542,18 +620,28 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
     return {
       chiefComplaintText: bodies.subjective.trim(),
       presentIllnessText,
-      // MDLand: DocPro-aligned path uses procbar / SavePage guard (not raw saveIt on wrong frame).
+      // MDLand: officevisit path uses procbar / SavePage visibility guard for reliable save.
       autoSave: true,
     }
   }
 
-  async function handleExport() {
-    if (!onSyncToEmr) {
-      toast.success('Export (demo) — note would be sent to your EHR.')
-      return
+  async function handleSync() {
+    const minVisualMs = 5000
+    const startedAt = Date.now()
+    setIsSyncAnimating(true)
+    try {
+      if (!onSyncToEmr) {
+        toast.success('Sync (demo) — note would be sent to your EHR.')
+        return
+      }
+      await onSyncToEmr(buildChiefComplaintSyncPayload())
+    } finally {
+      const elapsed = Date.now() - startedAt
+      if (elapsed < minVisualMs) {
+        await new Promise((resolve) => setTimeout(resolve, minVisualMs - elapsed))
+      }
+      setIsSyncAnimating(false)
     }
-
-    await onSyncToEmr(buildChiefComplaintSyncPayload())
   }
 
   function handleSave() {
@@ -753,10 +841,12 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
         }}
       />
 
+      <SyncTransferOverlay open={isSyncAnimating} />
+
       {!isEditing ? (
         <SoapFabMenu
           onCopy={handleCopy}
-          onExport={handleExport}
+          onSync={handleSync}
           onEdit={() => setIsEditing(true)}
         />
       ) : null}
