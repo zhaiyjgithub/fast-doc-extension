@@ -16,6 +16,7 @@ import { ProviderPage } from '@/pages/provider-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { getProviderProfile } from '@/lib/mock-provider'
 import { getDemographicByEncounterId } from '@/lib/patient-demographic'
+import { parsePatientFromDemographicsText } from '@/lib/parse-emr-demographics-patient'
 import { Home, FileText, Mic, Settings } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -79,7 +80,6 @@ export default function App() {
   const [loggedInUsername, setLoggedInUsername] = React.useState('')
   const [currentPage, setCurrentPage] = React.useState<AppPage>('home')
   const [patient, setPatient] = React.useState<Patient | null>(null)
-  const [matchedPatient, setMatchedPatient] = React.useState<Patient | null>(null)
   const [patientSheetOpen, setPatientSheetOpen] = React.useState(false)
   const [patientSheetIntent, setPatientSheetIntent] = React.useState<'select' | 'match'>('select')
   const [isDark, setIsDark] = React.useState(false)
@@ -165,7 +165,6 @@ export default function App() {
     setIsLoggedIn(false)
     setLoggedInUsername('')
     setPatient(null)
-    setMatchedPatient(null)
     setCurrentPage('home')
     toast.info('Signed out')
   }
@@ -176,21 +175,15 @@ export default function App() {
   }
 
   function handleSelectPatient(p: Patient) {
-    if (patientSheetIntent === 'match') {
-      setMatchedPatient(p)
-      toast.success(`Patient matched: ${p.name}`)
-    } else {
-      setPatient(p)
-      setMatchedPatient(null)
-      toast.success(`Patient selected: ${p.name}`)
-    }
+    setPatient(p)
+    toast.success(
+      patientSheetIntent === 'match' ? `Patient matched: ${p.name}` : `Patient selected: ${p.name}`,
+    )
   }
 
   function handleDismissActiveRecordingPatient() {
     if (patient != null) {
       setPatient(null)
-    } else if (matchedPatient != null) {
-      setMatchedPatient(null)
     }
   }
 
@@ -225,7 +218,18 @@ export default function App() {
           demographicsText: demographics.demographicsText,
         })
         console.log('[FastDoc] Demographics section text:', demographics.demographicsText ?? '')
-        toast.success('Demographics section text captured and printed in console')
+
+        const text = demographics.demographicsText ?? ''
+        const parsed = parsePatientFromDemographicsText(text)
+        if (parsed != null) {
+          setPatient({
+            ...parsed,
+            emrDemographicsSnapshot: text.trim(),
+          })
+          toast.success(`Patient selected: ${parsed.name}`)
+        } else {
+          toast.warning('Demographics captured but patient fields could not be parsed (need DOB in MM/DD/YYYY)')
+        }
       } else {
         const errorMessage =
           typeof result?.error === 'string' ? result.error : 'Patient demographics section not found'
@@ -338,10 +342,8 @@ export default function App() {
         {currentPage === 'recording' && (
           <RecordingPage
             patient={patient}
-            matchedPatient={matchedPatient}
             onGenerateEMR={handleGenerateEMR}
             onOpenPatientPicker={() => openPatientSheet('select')}
-            onOpenMatchPatientPicker={() => openPatientSheet('match')}
             onTapMatchPatient={handleTapMatchPatient}
             onDismissActivePatient={handleDismissActiveRecordingPatient}
           />

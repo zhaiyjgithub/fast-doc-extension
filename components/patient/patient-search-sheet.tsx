@@ -18,6 +18,8 @@ export interface Patient {
   dob: string
   gender?: 'Male' | 'Female' | 'Other'
   idNumber?: string
+  /** Full EMR demographics text when this patient was matched from page scrape (not from search list). */
+  emrDemographicsSnapshot?: string
 }
 
 interface PatientSearchSheetProps {

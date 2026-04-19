@@ -148,14 +148,10 @@ function liveLinesForElapsed(seconds: number): LiveLine[] {
 
 interface RecordingPageProps {
   patient?: Patient | null
-  /** Matched patient (e.g. via Match flow); combined with `patient` for recording context. */
-  matchedPatient?: Patient | null
   onGenerateEMR: (transcript: string) => void
-  /** Opens patient search sheet (e.g. from empty-state CTA). */
+  /** Opens patient search sheet (e.g. from empty-state CTA or Search). */
   onOpenPatientPicker?: () => void
-  /** Opens patient sheet in “match” mode (same sheet, stored as matched patient). */
-  onOpenMatchPatientPicker?: () => void
-  /** Optional callback for side effects when tapping the match patient CTA. */
+  /** Optional callback when tapping “match patient” (e.g. scrape EMR demographics into visit context). */
   onTapMatchPatient?: () => void
   /** Clears the current selected or matched patient for this visit (when idle or paused). */
   onDismissActivePatient?: () => void
@@ -254,10 +250,8 @@ function RippleButton({
 
 export function RecordingPage({
   patient,
-  matchedPatient = null,
   onGenerateEMR,
   onOpenPatientPicker,
-  onOpenMatchPatientPicker,
   onTapMatchPatient,
   onDismissActivePatient,
 }: RecordingPageProps) {
@@ -320,8 +314,8 @@ export function RecordingPage({
   })
 
   const beginNewRecordingFromClick = React.useCallback(() => {
-    if (patient == null && matchedPatient == null) {
-      toast.warning('Select a patient or match a patient to this visit before recording.')
+    if (patient == null) {
+      toast.warning('Select or match a patient for this visit before recording.')
       return
     }
     if (!DEEPGRAM_API_KEY) {
@@ -355,7 +349,7 @@ export function RecordingPage({
           toast.error(`Could not access microphone: ${name}`)
         }
       })
-  }, [patient, matchedPatient, deepgram.start])
+  }, [patient, deepgram.start])
 
   const handleCancelGenerateAndResume = React.useCallback(() => {
     if (processingTranscriptTimerRef.current) {
@@ -634,14 +628,13 @@ export function RecordingPage({
     setDismissPatientWarningOpen(false)
     resetRecordingSessionForNewPatient()
     onDismissActivePatient?.()
-    onOpenPatientPicker?.()
   }
 
-  const activePatient = patient ?? matchedPatient ?? null
+  const activePatient = patient ?? null
 
   function requirePatientOrMatch(): boolean {
-    if (patient != null || matchedPatient != null) return true
-    toast.warning('Select a patient or match a patient to this visit before recording.')
+    if (patient != null) return true
+    toast.warning('Select or match a patient for this visit before recording.')
     return false
   }
 
@@ -746,7 +739,7 @@ export function RecordingPage({
                 )}
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-foreground/70">
-                  {patient != null ? 'Active patient' : 'Matched patient'}
+                  Active patient
                 </span>
                 <span
                   className={cn(
@@ -777,6 +770,18 @@ export function RecordingPage({
               {activePatient.idNumber && (
                 <p className="text-xs font-medium text-muted-foreground">{activePatient.idNumber}</p>
               )}
+              {activePatient.emrDemographicsSnapshot ? (
+                <details className="mt-3 rounded-md border border-border/50 bg-background/60 p-2 text-left">
+                  <summary className="cursor-pointer select-none text-[11px] font-semibold text-muted-foreground hover:text-foreground">
+                    Full matched demographics
+                  </summary>
+                  <ScrollArea className="mt-2 max-h-48 pr-2">
+                    <pre className="wrap-break-word whitespace-pre-wrap px-1 py-1 font-mono text-[11px] leading-relaxed text-foreground/90">
+                      {activePatient.emrDemographicsSnapshot}
+                    </pre>
+                  </ScrollArea>
+                </details>
+              ) : null}
             </section>
           ) : onOpenPatientPicker ? (
             <div className="space-y-3">
@@ -791,7 +796,6 @@ export function RecordingPage({
                 type="button"
                 onClick={() => {
                   onTapMatchPatient?.()
-                  onOpenMatchPatientPicker?.()
                 }}
                 className="w-full rounded-lg border border-dashed border-emerald-400/80 bg-emerald-50/70 p-4 text-center text-sm text-emerald-950 transition-colors hover:border-emerald-500 hover:bg-emerald-100/90 hover:text-emerald-950 dark:border-emerald-600 dark:bg-emerald-950/35 dark:text-emerald-50 dark:hover:border-emerald-500 dark:hover:bg-emerald-950/55"
               >
