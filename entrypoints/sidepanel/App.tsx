@@ -30,7 +30,6 @@ import {
 } from '@/lib/provider-session'
 import { getProviderProfile, providerDisplayName, type ProviderProfile } from '@/lib/mock-provider'
 import { getDemographicByEncounterId } from '@/lib/patient-demographic'
-import { parsePatientFromDemographicsText } from '@/lib/parse-emr-demographics-patient'
 import { parseDemographicsTextWithLlm } from '@/lib/patient-api'
 import { Home, FileText, Mic, Settings } from 'lucide-react'
 import { toast } from 'sonner'
@@ -426,50 +425,25 @@ export default function App() {
           toast.warning('Demographics text is empty in this EMR section')
           return
         }
-        const parsedPayload = await parseDemographicsTextWithLlm(accessToken, text)
-        const parsed: Patient | null = parsedPayload.dateOfBirth
-          ? {
-              id: parsedPayload.clinicPatientId
-                ? `emr-${parsedPayload.clinicPatientId}`
-                : `emr-${Date.now()}`,
-              firstName: parsedPayload.firstName,
-              lastName: parsedPayload.lastName,
-              dateOfBirth: parsedPayload.dateOfBirth,
-              gender: parsedPayload.gender ?? undefined,
-              primaryLanguage: parsedPayload.primaryLanguage,
-              clinicPatientId: parsedPayload.clinicPatientId,
-              clinicId: providerProfile?.clinicId ?? null,
-              divisionId: providerProfile?.divisionId ?? null,
-              clinicSystem: providerProfile?.clinicSystem ?? providerProfile?.siteLabel ?? null,
-              clinicName: providerProfile?.clinicName ?? null,
-              isActive: true,
-              demographics:
-                parsedPayload.demographics == null
-                  ? null
-                  : {
-                      phone: parsedPayload.demographics.phone ?? null,
-                      email: parsedPayload.demographics.email ?? null,
-                      addressLine1: parsedPayload.demographics.addressLine1 ?? null,
-                      city: parsedPayload.demographics.city ?? null,
-                      state: parsedPayload.demographics.state ?? null,
-                      zipCode: parsedPayload.demographics.zipCode ?? null,
-                      country: null,
-                    },
-            }
-          : parsePatientFromDemographicsText(text)
-        if (parsed != null) {
-          const alignedPatient: Patient = {
-            ...parsed,
-            clinicId: parsed.clinicId ?? providerProfile?.clinicId ?? null,
-            divisionId: parsed.divisionId ?? providerProfile?.divisionId ?? null,
-            clinicSystem:
-              parsed.clinicSystem ?? providerProfile?.clinicSystem ?? providerProfile?.siteLabel ?? null,
-            clinicName: parsed.clinicName ?? providerProfile?.clinicName ?? null,
-          }
-          setPatient(alignedPatient)
-          toast.success(`Patient selected: ${patientDisplayName(alignedPatient)}`)
+        const clinicId = providerProfile?.clinicId?.trim()
+        const divisionId = providerProfile?.divisionId?.trim()
+        const clinicSystem = providerProfile?.clinicSystem?.trim()
+        if (!clinicId || !divisionId || !clinicSystem) {
+          toast.warning('Provider profile is missing clinic context (clinic/division/system).')
+          return
+        }
+        const parsedResult = await parseDemographicsTextWithLlm(accessToken, text, {
+          clinicId,
+          divisionId,
+          clinicSystem,
+          clinicName: providerProfile?.clinicName ?? null,
+        })
+        setPatient(parsedResult.patient)
+        const name = patientDisplayName(parsedResult.patient)
+        if (parsedResult.isNew) {
+          toast.success(`Created new patient: ${name}`)
         } else {
-          toast.warning('Demographics captured but patient fields could not be parsed (need DOB in MM/DD/YYYY)')
+          toast.success(`Matched existing patient: ${name}`)
         }
       } else {
         const errorMessage =

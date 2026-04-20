@@ -88,72 +88,80 @@ const SECTIONS: {
   },
 ]
 
-interface IcdFinding {
-  id: string
-  title: string
-  statusLabel: string
-  icdCode: string
-  icdDescription: string
-  rationale: string
-  /** Small badge letter (e.g. HCC / navigation flag) */
-  navFlag?: string
+interface ReportCodeEvidence {
+  evidenceRoute: string | null
+  excerpt: string | null
 }
 
-const ICD_FINDINGS: IcdFinding[] = [
+interface ReportCodeSuggestion {
+  id: string
+  code: string
+  codeType: 'ICD' | 'CPT'
+  rank: number
+  condition: string | null
+  description: string | null
+  confidence: number | null
+  rationale: string | null
+  status: string
+  evidence: ReportCodeEvidence[]
+}
+
+const ICD_SUGGESTIONS: ReportCodeSuggestion[] = [
   {
     id: 'htn',
-    title: 'HTN (Hypertension)',
-    statusLabel: 'Present',
-    icdCode: 'I10',
-    icdDescription:
-      'Essential (primary) hypertension',
+    code: 'I10',
+    codeType: 'ICD',
+    rank: 1,
+    condition: 'HTN',
+    description: 'Essential (primary) hypertension',
+    confidence: 0.95,
     rationale:
       'Documented as a reason for visit with elevated blood pressure readings (140s) and associated symptoms of headache/dizziness.',
-    navFlag: 'N',
+    status: 'needs_review',
+    evidence: [{ evidenceRoute: 'llm_icd', excerpt: 'Elevated blood pressure readings in 140s.' }],
   },
   {
     id: 'knee',
-    title: 'Knee replacement surgeries',
-    statusLabel: 'Present',
-    icdCode: 'Z96.653',
-    icdDescription:
-      'Presence of artificial knee joint, bilateral',
+    code: 'Z96.653',
+    codeType: 'ICD',
+    rank: 2,
+    condition: 'History of bilateral knee replacement',
+    description: 'Presence of artificial knee joint, bilateral',
+    confidence: 0.88,
     rationale:
       'Prior operative reports and implant documentation reviewed; relevant to surgical planning and medication counseling.',
-    navFlag: 'N',
+    status: 'needs_review',
+    evidence: [{ evidenceRoute: 'patient_rag', excerpt: 'Bilateral TKA present in surgical history.' }],
   },
 ]
 
-interface CptFinding {
-  id: string
-  title: string
-  statusLabel: string
-  cptCode: string
-  cptDescription: string
-  rationale: string
-  navFlag?: string
-}
-
-const CPT_FINDINGS: CptFinding[] = [
+const CPT_SUGGESTIONS: ReportCodeSuggestion[] = [
   {
     id: '99213',
-    title: 'Office visit — established patient, low to moderate MDM',
-    statusLabel: 'Suggested',
-    cptCode: '99213',
-    cptDescription:
+    code: '99213',
+    codeType: 'CPT',
+    rank: 1,
+    condition: 'Established office visit',
+    description:
       'Office or other outpatient visit for the evaluation and management of an established patient; 20–29 minutes typically spent.',
+    confidence: 0.88,
     rationale:
       'Acute bronchitis with prescription management and patient education; MDM and documentation support 99213 level.',
-    navFlag: 'N',
+    status: 'needs_review',
+    evidence: [{ evidenceRoute: 'llm_cpt', excerpt: 'Problem-focused visit with medication management.' }],
   },
   {
     id: '94640',
-    title: 'Inhalation treatment for airway obstruction',
-    statusLabel: 'Suggested',
-    cptCode: '94640',
-    cptDescription:
+    code: '94640',
+    codeType: 'CPT',
+    rank: 2,
+    condition: 'Nebulizer treatment',
+    description:
       'Pressurized or nonpressurized inhalation treatment for acute airway obstruction or for diagnostic purposes.',
+    confidence: 0.82,
     rationale: 'Albuterol administered via nebulizer during visit for wheeze and cough.',
+    status: 'needs_review',
+    evidence: [{ evidenceRoute: 'llm_cpt', excerpt: 'Inhalation therapy given during encounter.' }],
   },
 ]
 
@@ -197,34 +205,45 @@ function patientDisplayName(patient: Patient): string {
   return `${patient.firstName} ${patient.lastName}`.trim()
 }
 
+function formatSuggestionStatus(status: string): string {
+  return status
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function suggestionTitle(suggestion: ReportCodeSuggestion): string {
+  return suggestion.condition?.trim() || suggestion.description?.trim() || suggestion.code
+}
+
 const fabCopyExport = [
   { icon: Copy, label: 'Copy', action: 'copy' as const },
   { icon: RefreshCw, label: 'Sync', action: 'sync' as const },
 ] as const
 
-type ClinicalCodeDetail = { kind: 'icd'; row: IcdFinding } | { kind: 'cpt'; row: CptFinding }
+type ClinicalCodeDetail = { row: ReportCodeSuggestion }
 
 function ClinicalCodeCard({
   borderAccentClass,
   title,
-  statusLabel,
+  status,
   code,
   codeFieldLabel,
   description,
   descriptionFieldLabel,
   rationale,
-  navFlag,
+  confidence,
   onOpenDetail,
 }: {
   borderAccentClass: string
   title: string
-  statusLabel: string
+  status: string
   code: string
   codeFieldLabel: string
   description: string
   descriptionFieldLabel: string
   rationale: string
-  navFlag?: string
+  confidence?: number | null
   onOpenDetail: () => void
 }) {
   function handleCopyCode(e: React.MouseEvent | React.PointerEvent) {
@@ -256,20 +275,13 @@ function ClinicalCodeCard({
     >
       <div className="mb-3 flex items-start justify-between gap-3">
         <span className="min-w-0 flex-1 text-base font-bold leading-snug text-foreground">{title}</span>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {navFlag ? (
-            <span className="flex size-5 items-center justify-center rounded bg-sky-200 text-[10px] font-bold text-sky-900 dark:bg-sky-800 dark:text-sky-50">
-              {navFlag}
-            </span>
-          ) : null}
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" aria-hidden />
-        </div>
+        <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground/50" aria-hidden />
       </div>
 
       <p className="mb-3 text-sm text-foreground">
         <span className="text-muted-foreground">Status: </span>
         <span className="inline-flex rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
-          {statusLabel}
+          {formatSuggestionStatus(status)}
         </span>
       </p>
 
@@ -293,6 +305,12 @@ function ClinicalCodeCard({
           <span className="text-muted-foreground">{descriptionFieldLabel}: </span>
           <span className="text-foreground/90">{description}</span>
         </p>
+        {typeof confidence === 'number' ? (
+          <p>
+            <span className="text-muted-foreground">Confidence: </span>
+            <span className="text-foreground/90">{Math.round(confidence * 100)}%</span>
+          </p>
+        ) : null}
         <div>
           <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Rationale</p>
           <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{rationale}</p>
@@ -310,29 +328,17 @@ function ClinicalCodeDetailDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const payload = detail
-    ? detail.kind === 'icd'
-      ? {
-          section: 'ICD' as const,
-          title: detail.row.title,
-          statusLabel: detail.row.statusLabel,
-          code: detail.row.icdCode,
-          codeFieldLabel: 'ICD code',
-          description: detail.row.icdDescription,
-          descriptionFieldLabel: 'ICD description',
-          rationale: detail.row.rationale,
-          navFlag: detail.row.navFlag,
-        }
-      : {
-          section: 'CPT' as const,
-          title: detail.row.title,
-          statusLabel: detail.row.statusLabel,
-          code: detail.row.cptCode,
-          codeFieldLabel: 'CPT code',
-          description: detail.row.cptDescription,
-          descriptionFieldLabel: 'CPT description',
-          rationale: detail.row.rationale,
-          navFlag: detail.row.navFlag,
-        }
+    ? {
+        section: detail.row.codeType,
+        title: suggestionTitle(detail.row),
+        status: detail.row.status,
+        code: detail.row.code,
+        codeFieldLabel: `${detail.row.codeType} code`,
+        description: detail.row.description?.trim() || '-',
+        descriptionFieldLabel: `${detail.row.codeType} description`,
+        rationale: detail.row.rationale?.trim() || '-',
+        confidence: detail.row.confidence,
+      }
     : null
 
   return (
@@ -353,13 +359,6 @@ function ClinicalCodeDetailDialog({
               <DialogDescription className="sr-only">
                 {payload.section} code {payload.code}. Full clinical coding rationale and description.
               </DialogDescription>
-              {payload.navFlag ? (
-                <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                  <span className="flex size-5 items-center justify-center rounded bg-sky-200 text-[10px] font-bold text-sky-900 dark:bg-sky-800 dark:text-sky-50">
-                    {payload.navFlag}
-                  </span>
-                </div>
-              ) : null}
             </DialogHeader>
 
             <ScrollArea className="min-h-0 max-h-[min(52vh,420px)] flex-1">
@@ -367,7 +366,7 @@ function ClinicalCodeDetailDialog({
                 <p>
                   <span className="text-muted-foreground">Status: </span>
                   <span className="inline-flex rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
-                    {payload.statusLabel}
+                    {formatSuggestionStatus(payload.status)}
                   </span>
                 </p>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -393,6 +392,12 @@ function ClinicalCodeDetailDialog({
                   <span className="text-muted-foreground">{payload.descriptionFieldLabel}: </span>
                   <span className="text-foreground/90">{payload.description}</span>
                 </p>
+                {typeof payload.confidence === 'number' ? (
+                  <p>
+                    <span className="text-muted-foreground">Confidence: </span>
+                    <span className="text-foreground/90">{Math.round(payload.confidence * 100)}%</span>
+                  </p>
+                ) : null}
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                     Rationale
@@ -607,8 +612,8 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
   }
 
   function buildChiefComplaintSyncPayload() {
-    const icdCodeList = ICD_FINDINGS.map((row) => row.icdCode).join(', ')
-    const cptCodeList = CPT_FINDINGS.map((row) => row.cptCode).join(', ')
+    const icdCodeList = ICD_SUGGESTIONS.map((row) => row.code).join(', ')
+    const cptCodeList = CPT_SUGGESTIONS.map((row) => row.code).join(', ')
 
     const presentIllnessText = [
       `Objective:\n${bodies.objective}`,
@@ -801,19 +806,19 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
             <Sparkles className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
             <h3 className="text-base font-bold text-foreground">AI Suggested ICD</h3>
           </motion.div>
-          {ICD_FINDINGS.map((row) => (
+          {ICD_SUGGESTIONS.map((row) => (
             <motion.div key={row.id} variants={soapPageItemVariants}>
               <ClinicalCodeCard
                 borderAccentClass="border-l-violet-500"
-                title={row.title}
-                statusLabel={row.statusLabel}
-                code={row.icdCode}
+                title={suggestionTitle(row)}
+                status={row.status}
+                code={row.code}
                 codeFieldLabel="ICD code"
-                description={row.icdDescription}
+                description={row.description?.trim() || '-'}
                 descriptionFieldLabel="ICD description"
-                rationale={row.rationale}
-                navFlag={row.navFlag}
-                onOpenDetail={() => setCodeDetail({ kind: 'icd', row })}
+                rationale={row.rationale?.trim() || '-'}
+                confidence={row.confidence}
+                onOpenDetail={() => setCodeDetail({ row })}
               />
             </motion.div>
           ))}
@@ -825,19 +830,19 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
             <Code2 className="size-5 shrink-0 text-teal-600 dark:text-teal-400" />
             <h3 className="text-base font-bold text-foreground">AI Suggested CPT</h3>
           </motion.div>
-          {CPT_FINDINGS.map((row) => (
+          {CPT_SUGGESTIONS.map((row) => (
             <motion.div key={row.id} variants={soapPageItemVariants}>
               <ClinicalCodeCard
                 borderAccentClass="border-l-teal-500"
-                title={row.title}
-                statusLabel={row.statusLabel}
-                code={row.cptCode}
+                title={suggestionTitle(row)}
+                status={row.status}
+                code={row.code}
                 codeFieldLabel="CPT code"
-                description={row.cptDescription}
+                description={row.description?.trim() || '-'}
                 descriptionFieldLabel="CPT description"
-                rationale={row.rationale}
-                navFlag={row.navFlag}
-                onOpenDetail={() => setCodeDetail({ kind: 'cpt', row })}
+                rationale={row.rationale?.trim() || '-'}
+                confidence={row.confidence}
+                onOpenDetail={() => setCodeDetail({ row })}
               />
             </motion.div>
           ))}
