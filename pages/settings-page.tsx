@@ -42,6 +42,8 @@ interface SettingsPageProps {
   onToggleDark: (val: boolean) => void
   onLogout: () => void
   username?: string
+  providerSpecialty?: string
+  clinicName?: string
   /** Opens full provider profile (demo). */
   onOpenProvider?: () => void
 }
@@ -80,6 +82,8 @@ export function SettingsPage({
   onToggleDark,
   onLogout,
   username = 'Physician',
+  providerSpecialty = 'Attending physician',
+  clinicName,
   onOpenProvider,
 }: SettingsPageProps) {
   return (
@@ -102,7 +106,7 @@ export function SettingsPage({
           <div>
             <p className="font-semibold">{username}</p>
             <Badge variant="secondary" className="mt-1 text-xs">
-              Attending physician
+              {providerSpecialty}
             </Badge>
           </div>
         </motion.div>
@@ -115,7 +119,7 @@ export function SettingsPage({
             <SettingsRow
               icon={<User className="h-4 w-4" />}
               label="Profile"
-              description="Provider details"
+              description={clinicName ? `${clinicName} · Provider details` : 'Provider details'}
               onClick={() => onOpenProvider?.()}
             >
               <ChevronRight className="h-4 w-4 text-muted-foreground" />

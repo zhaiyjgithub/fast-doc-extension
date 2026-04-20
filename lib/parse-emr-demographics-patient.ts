@@ -19,20 +19,29 @@ export function parsePatientFromDemographicsText(demographicsText: string): Pati
   const nameMatch =
     normalized.match(/\bName:\s*(.+?)\s+DOB:/i) ?? normalized.match(/\bEdit Name:\s*(.+?)\s+DOB:/i)
   const name = nameMatch?.[1]?.trim().replace(/\s+Edit$/i, '').trim() || 'Unknown patient'
+  const nameParts = name.split(',').map((part) => part.trim()).filter(Boolean)
+  const fullName =
+    nameParts.length >= 2 ? `${nameParts[1]} ${nameParts[0]}`.trim() : name
+  const splitName = fullName.split(/\s+/).filter(Boolean)
+  const firstName = splitName[0] ?? 'Unknown'
+  const lastName = splitName.length > 1 ? splitName.slice(1).join(' ') : 'Patient'
 
   const genderMatch = normalized.match(/\bGender:\s*(Male|Female|Other)\b/i)
   const gender = genderMatch?.[1] as Patient['gender'] | undefined
 
-  const idMatch = normalized.match(/\bPatient\s*ID:\s*([^\s]+)/i)
-  const idNumber = idMatch?.[1]?.trim()
+  const clinicPatientId = normalized.match(/\bPatient\s*ID:\s*([^\s]+)/i)?.[1]?.trim()
 
-  const id = idNumber != null && idNumber.length > 0 ? `emr-${idNumber}` : `emr-${dobIso}-${Date.now()}`
+  const id =
+    clinicPatientId != null && clinicPatientId.length > 0
+      ? `emr-${clinicPatientId}`
+      : `emr-${dobIso}-${Date.now()}`
 
   return {
     id,
-    name,
-    dob: dobIso,
+    firstName,
+    lastName,
+    dateOfBirth: dobIso,
+    clinicPatientId: clinicPatientId ?? null,
     ...(gender === 'Male' || gender === 'Female' || gender === 'Other' ? { gender } : {}),
-    ...(idNumber ? { idNumber: `Patient ID ${idNumber}` } : {}),
   }
 }

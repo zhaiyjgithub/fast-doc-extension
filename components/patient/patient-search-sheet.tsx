@@ -14,12 +14,28 @@ import { cn } from '@/lib/utils'
 
 export interface Patient {
   id: string
-  name: string
-  dob: string
+  mrn?: string
+  createdBy?: string | null
+  clinicPatientId?: string | null
+  clinicId?: string | null
+  divisionId?: string | null
+  clinicSystem?: string | null
+  clinicName?: string | null
+  firstName: string
+  lastName: string
+  dateOfBirth: string
   gender?: 'Male' | 'Female' | 'Other'
-  idNumber?: string
-  /** Full EMR demographics text when this patient was matched from page scrape (not from search list). */
-  emrDemographicsSnapshot?: string
+  primaryLanguage?: string | null
+  isActive?: boolean
+  demographics?: {
+    phone?: string | null
+    email?: string | null
+    addressLine1?: string | null
+    city?: string | null
+    state?: string | null
+    zipCode?: string | null
+    country?: string | null
+  } | null
 }
 
 interface PatientSearchSheetProps {
@@ -29,11 +45,51 @@ interface PatientSearchSheetProps {
 }
 
 const MOCK_PATIENTS: Patient[] = [
-  { id: '1', name: 'James Wilson', dob: '1985-03-12', gender: 'Male', idNumber: 'MRN-100842' },
-  { id: '2', name: 'Sarah Chen', dob: '1992-07-25', gender: 'Female', idNumber: 'MRN-100903' },
-  { id: '3', name: 'Emily Rodriguez', dob: '1978-11-03', gender: 'Female', idNumber: 'MRN-100721' },
-  { id: '4', name: 'Michael Torres', dob: '2001-01-18', gender: 'Male', idNumber: 'MRN-101012' },
-  { id: '5', name: 'Lisa Park', dob: '1965-09-30', gender: 'Female', idNumber: 'MRN-100655' },
+  {
+    id: '1',
+    mrn: 'MRN-100842',
+    firstName: 'James',
+    lastName: 'Wilson',
+    dateOfBirth: '1985-03-12',
+    gender: 'Male',
+    isActive: true,
+  },
+  {
+    id: '2',
+    mrn: 'MRN-100903',
+    firstName: 'Sarah',
+    lastName: 'Chen',
+    dateOfBirth: '1992-07-25',
+    gender: 'Female',
+    isActive: true,
+  },
+  {
+    id: '3',
+    mrn: 'MRN-100721',
+    firstName: 'Emily',
+    lastName: 'Rodriguez',
+    dateOfBirth: '1978-11-03',
+    gender: 'Female',
+    isActive: true,
+  },
+  {
+    id: '4',
+    mrn: 'MRN-101012',
+    firstName: 'Michael',
+    lastName: 'Torres',
+    dateOfBirth: '2001-01-18',
+    gender: 'Male',
+    isActive: true,
+  },
+  {
+    id: '5',
+    mrn: 'MRN-100655',
+    firstName: 'Lisa',
+    lastName: 'Park',
+    dateOfBirth: '1965-09-30',
+    gender: 'Female',
+    isActive: true,
+  },
 ]
 
 const AVATAR_STYLES = [
@@ -57,6 +113,10 @@ function formatDobDisplay(iso: string): string {
   return isValid(d) ? format(d, 'MM/dd/yyyy') : iso
 }
 
+function displayName(patient: Patient): string {
+  return `${patient.firstName} ${patient.lastName}`.trim()
+}
+
 export function PatientSearchSheet({
   open,
   onOpenChange,
@@ -68,11 +128,13 @@ export function PatientSearchSheet({
   const q = query.trim().toLowerCase()
   const filtered = MOCK_PATIENTS.filter((p) => {
     if (!q) return true
-    const dobFmt = formatDobDisplay(p.dob).toLowerCase()
+    const name = displayName(p).toLowerCase()
+    const dobFmt = formatDobDisplay(p.dateOfBirth).toLowerCase()
     return (
-      p.name.toLowerCase().includes(q) ||
-      (p.idNumber ?? '').toLowerCase().includes(q) ||
-      p.dob.toLowerCase().includes(q) ||
+      name.includes(q) ||
+      (p.mrn ?? '').toLowerCase().includes(q) ||
+      (p.clinicPatientId ?? '').toLowerCase().includes(q) ||
+      p.dateOfBirth.toLowerCase().includes(q) ||
       dobFmt.includes(q)
     )
   })
@@ -136,7 +198,8 @@ export function PatientSearchSheet({
                     <Skeleton key={i} className="h-[88px] rounded-lg" />
                   ))
                 : filtered.map((patient, index) => {
-                    const ini = initialsFromName(patient.name)
+                    const name = displayName(patient)
+                    const ini = initialsFromName(name)
                     const style = AVATAR_STYLES[index % AVATAR_STYLES.length]
                     const mutedAvatar = patient.id === '4'
                     return (
@@ -160,15 +223,15 @@ export function PatientSearchSheet({
                         </div>
                         <div className="min-w-0 flex-1">
                           <h3 className="font-bold text-foreground transition-colors group-hover:text-primary">
-                            {patient.name}
+                            {name}
                           </h3>
                           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>{patient.idNumber ?? '—'}</span>
+                            <span>{patient.clinicPatientId ?? patient.mrn ?? '—'}</span>
                             <span
                               className="size-1 shrink-0 rounded-full bg-border"
                               aria-hidden
                             />
-                            <span>DOB: {formatDobDisplay(patient.dob)}</span>
+                            <span>DOB: {formatDobDisplay(patient.dateOfBirth)}</span>
                           </div>
                         </div>
                         <ChevronRight

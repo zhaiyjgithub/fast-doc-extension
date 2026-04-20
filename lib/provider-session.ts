@@ -1,7 +1,12 @@
-import type { AuthUser, PersistedAuthSession } from './auth-types'
+import type { ProviderProfile } from './mock-provider'
 
-const AUTH_SESSION_KEY = 'fastdoc.auth.session'
+const PROVIDER_PROFILE_KEY = 'fastdoc.provider.profile'
 let warnedMissingStorage = false
+
+type PersistedProviderProfile = {
+  providerId: string
+  profile: ProviderProfile
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -15,34 +20,25 @@ function asNonEmptyString(value: unknown): string | null {
   return trimmed ? trimmed : null
 }
 
-function isAuthUser(value: unknown): value is AuthUser {
+function isProviderProfile(value: unknown): value is ProviderProfile {
   if (!isPlainObject(value)) {
     return false
   }
-
-  const userId = asNonEmptyString(value.userId)
-  const email = asNonEmptyString(value.email)
-  const userType = value.userType
-  const providerId = value.providerId === null ? null : asNonEmptyString(value.providerId)
-
   return (
-    !!userId &&
-    !!email &&
-    (userType === 'doctor' || userType === 'admin') &&
-    (providerId === null || !!providerId)
+    !!asNonEmptyString(value.firstName) &&
+    !!asNonEmptyString(value.lastName) &&
+    !!asNonEmptyString(value.specialty) &&
+    !!asNonEmptyString(value.email) &&
+    !!asNonEmptyString(value.clinicName) &&
+    !!asNonEmptyString(value.siteLabel)
   )
 }
 
-function isPersistedAuthSession(value: unknown): value is PersistedAuthSession {
+function isPersistedProviderProfile(value: unknown): value is PersistedProviderProfile {
   if (!isPlainObject(value)) {
     return false
   }
-
-  const accessToken = asNonEmptyString(value.accessToken)
-  const refreshToken = asNonEmptyString(value.refreshToken)
-  const username = asNonEmptyString(value.username)
-
-  return !!accessToken && !!refreshToken && !!username && isAuthUser(value.user)
+  return !!asNonEmptyString(value.providerId) && isProviderProfile(value.profile)
 }
 
 type StorageLocalLike = {
@@ -53,9 +49,23 @@ type StorageLocalLike = {
 
 function storageLocalOrNull(): StorageLocalLike | null {
   const g = globalThis as {
-    browser?: { storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>>; set: (items: Record<string, unknown>) => Promise<void>; remove: (key: string) => Promise<void> } } }
+    browser?: {
+      storage?: {
+        local?: {
+          get: (key: string) => Promise<Record<string, unknown>>
+          set: (items: Record<string, unknown>) => Promise<void>
+          remove: (key: string) => Promise<void>
+        }
+      }
+    }
     chrome?: {
-      storage?: { local?: { get: (key: string, cb: (items: unknown) => void) => void; set: (items: Record<string, unknown>, cb?: () => void) => void; remove: (key: string, cb?: () => void) => void } }
+      storage?: {
+        local?: {
+          get: (key: string, cb: (items: unknown) => void) => void
+          set: (items: Record<string, unknown>, cb?: () => void) => void
+          remove: (key: string, cb?: () => void) => void
+        }
+      }
       runtime?: { lastError?: { message?: string } }
     }
   }
@@ -111,49 +121,59 @@ function storageLocalOrNull(): StorageLocalLike | null {
   if (!warnedMissingStorage) {
     warnedMissingStorage = true
     console.warn(
-      '[FastDoc][auth] no extension storage API available (browser/chrome); auth session will not persist.',
+      '[FastDoc][provider] no extension storage API available (browser/chrome); provider profile will not persist.',
     )
   }
   return null
 }
 
-export async function loadAuthSession(): Promise<PersistedAuthSession | null> {
+export async function loadPersistedProviderProfile(providerId: string): Promise<ProviderProfile | null> {
+  const pid = providerId.trim()
+  if (!pid) {
+    return null
+  }
   const storageLocal = storageLocalOrNull()
   if (!storageLocal) {
     return null
   }
-  const result = await storageLocal.get(AUTH_SESSION_KEY)
-  const raw = result as Record<string, unknown>
-  const maybeSession = raw[AUTH_SESSION_KEY]
-
-  if (!isPersistedAuthSession(maybeSession)) {
-    if (Object.prototype.hasOwnProperty.call(raw, AUTH_SESSION_KEY)) {
-      await storageLocal.remove(AUTH_SESSION_KEY)
+  const raw = (await storageLocal.get(PROVIDER_PROFILE_KEY)) as Record<string, unknown>
+  const maybeValue = raw[PROVIDER_PROFILE_KEY]
+  if (!isPersistedProviderProfile(maybeValue)) {
+    if (Object.prototype.hasOwnProperty.call(raw, PROVIDER_PROFILE_KEY)) {
+      await storageLocal.remove(PROVIDER_PROFILE_KEY)
     }
     return null
   }
-
-  return maybeSession
+  if (maybeValue.providerId !== pid) {
+    return null
+  }
+  return maybeValue.profile
 }
 
-export async function saveAuthSession(session: PersistedAuthSession): Promise<void> {
-  if (!isPersistedAuthSession(session)) {
-    throw new Error('Cannot persist malformed auth session.')
+export async function savePersistedProviderProfile(
+  providerId: string,
+  profile: ProviderProfile,
+): Promise<void> {
+  const pid = providerId.trim()
+  if (!pid || !isProviderProfile(profile)) {
+    return
   }
-
   const storageLocal = storageLocalOrNull()
   if (!storageLocal) {
     return
   }
   await storageLocal.set({
-    [AUTH_SESSION_KEY]: session,
+    [PROVIDER_PROFILE_KEY]: {
+      providerId: pid,
+      profile,
+    } satisfies PersistedProviderProfile,
   })
 }
 
-export async function clearAuthSession(): Promise<void> {
+export async function clearPersistedProviderProfile(): Promise<void> {
   const storageLocal = storageLocalOrNull()
   if (!storageLocal) {
     return
   }
-  await storageLocal.remove(AUTH_SESSION_KEY)
+  await storageLocal.remove(PROVIDER_PROFILE_KEY)
 }

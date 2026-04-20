@@ -182,6 +182,10 @@ function genderDisplayLabel(gender: Patient['gender']): string | null {
   return null
 }
 
+function patientDisplayName(patient: Patient): string {
+  return `${patient.firstName} ${patient.lastName}`.trim()
+}
+
 function AudioWaveform({ compact = false }: { compact?: boolean }) {
   const count = compact ? 14 : 20
   const indices = React.useMemo(() => Array.from({ length: count }, (_, i) => i), [count])
@@ -638,8 +642,10 @@ export function RecordingPage({
     return false
   }
 
-  const age = activePatient?.dob ? ageFromDob(activePatient.dob) : null
-  const patientDobFormatted = activePatient?.dob ? formatDobMmDdYyyy(activePatient.dob) : null
+  const age = activePatient?.dateOfBirth ? ageFromDob(activePatient.dateOfBirth) : null
+  const patientDobFormatted = activePatient?.dateOfBirth
+    ? formatDobMmDdYyyy(activePatient.dateOfBirth)
+    : null
   const patientGenderLabel = activePatient?.gender
     ? genderDisplayLabel(activePatient.gender)
     : null
@@ -755,7 +761,7 @@ export function RecordingPage({
                 </span>
               </div>
               <h2 className="mt-1 text-lg font-extrabold text-foreground">
-                {activePatient.name}
+                {patientDisplayName(activePatient)}
                 {age != null ? `, ${age} yrs` : ''}
               </h2>
               {(patientDobFormatted || patientGenderLabel) && (
@@ -767,20 +773,37 @@ export function RecordingPage({
                   {patientGenderLabel ? <>Gender: {patientGenderLabel}</> : null}
                 </p>
               )}
-              {activePatient.idNumber && (
-                <p className="text-xs font-medium text-muted-foreground">{activePatient.idNumber}</p>
+              {(activePatient.clinicPatientId || activePatient.mrn) && (
+                <p className="text-xs font-medium text-muted-foreground">
+                  {activePatient.clinicPatientId
+                    ? `Patient ID ${activePatient.clinicPatientId}`
+                    : activePatient.mrn}
+                </p>
               )}
-              {activePatient.emrDemographicsSnapshot ? (
-                <details className="mt-3 rounded-md border border-border/50 bg-background/60 p-2 text-left">
-                  <summary className="cursor-pointer select-none text-[11px] font-semibold text-muted-foreground hover:text-foreground">
-                    Full matched demographics
-                  </summary>
-                  <ScrollArea className="mt-2 max-h-48 pr-2">
-                    <pre className="wrap-break-word whitespace-pre-wrap px-1 py-1 font-mono text-[11px] leading-relaxed text-foreground/90">
-                      {activePatient.emrDemographicsSnapshot}
-                    </pre>
-                  </ScrollArea>
-                </details>
+              {activePatient.primaryLanguage && (
+                <p className="text-xs font-medium text-muted-foreground">
+                  Language: {activePatient.primaryLanguage}
+                </p>
+              )}
+              {activePatient.demographics ? (
+                <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                  {activePatient.demographics.phone ? (
+                    <p>Phone: {activePatient.demographics.phone}</p>
+                  ) : null}
+                  {activePatient.demographics.email ? (
+                    <p>Email: {activePatient.demographics.email}</p>
+                  ) : null}
+                  {activePatient.demographics.addressLine1 ? (
+                    <p>
+                      Address: {activePatient.demographics.addressLine1}
+                      {activePatient.demographics.city ? `, ${activePatient.demographics.city}` : ''}
+                      {activePatient.demographics.state ? `, ${activePatient.demographics.state}` : ''}
+                      {activePatient.demographics.zipCode
+                        ? ` ${activePatient.demographics.zipCode}`
+                        : ''}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </section>
           ) : onOpenPatientPicker ? (

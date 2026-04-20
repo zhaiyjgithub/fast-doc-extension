@@ -22,9 +22,16 @@ import {
   refreshProviderToken,
 } from '@/lib/auth-api'
 import { clearAuthSession, loadAuthSession, saveAuthSession } from '@/lib/auth-session'
-import { getProviderProfile } from '@/lib/mock-provider'
+import { fetchProviderProfile } from '@/lib/provider-api'
+import {
+  clearPersistedProviderProfile,
+  loadPersistedProviderProfile,
+  savePersistedProviderProfile,
+} from '@/lib/provider-session'
+import { getProviderProfile, providerDisplayName, type ProviderProfile } from '@/lib/mock-provider'
 import { getDemographicByEncounterId } from '@/lib/patient-demographic'
 import { parsePatientFromDemographicsText } from '@/lib/parse-emr-demographics-patient'
+import { parseDemographicsTextWithLlm } from '@/lib/patient-api'
 import { Home, FileText, Mic, Settings } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -65,6 +72,10 @@ type SyncChiefComplaintPayload = {
 
 const DEBUG_EMR_BRIDGE = true
 
+function patientDisplayName(patient: Patient): string {
+  return `${patient.firstName} ${patient.lastName}`.trim()
+}
+
 function logEmrDebug(scope: string, message: string, details?: unknown) {
   if (!DEBUG_EMR_BRIDGE) return
   const prefix = `[FastDoc][${scope}]`
@@ -88,6 +99,8 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = React.useState(false)
   const [loggedInUsername, setLoggedInUsername] = React.useState('')
   const [accessToken, setAccessToken] = React.useState<string | null>(null)
+  const [providerId, setProviderId] = React.useState<string | null>(null)
+  const [providerProfile, setProviderProfile] = React.useState<ProviderProfile | null>(null)
   const [currentPage, setCurrentPage] = React.useState<AppPage>('home')
   const [patient, setPatient] = React.useState<Patient | null>(null)
   const [patientSheetOpen, setPatientSheetOpen] = React.useState(false)
@@ -173,6 +186,15 @@ export default function App() {
           const user = await fetchCurrentUser(persistedSession.accessToken)
           if (cancelled) return
           setAccessToken(persistedSession.accessToken)
+          setProviderId(user.providerId)
+          if (user.providerId) {
+            const cachedProfile = await loadPersistedProviderProfile(user.providerId)
+            if (!cancelled) {
+              setProviderProfile(cachedProfile)
+            }
+          } else if (!cancelled) {
+            setProviderProfile(null)
+          }
           setLoggedInUsername(user.email)
           setIsLoggedIn(true)
           await saveAuthSession({
@@ -211,6 +233,15 @@ export default function App() {
             user: refreshedUser,
           })
           setAccessToken(refreshed.accessToken)
+          setProviderId(refreshedUser.providerId)
+          if (refreshedUser.providerId) {
+            const cachedProfile = await loadPersistedProviderProfile(refreshedUser.providerId)
+            if (!cancelled) {
+              setProviderProfile(cachedProfile)
+            }
+          } else if (!cancelled) {
+            setProviderProfile(null)
+          }
           setLoggedInUsername(refreshedUser.email)
           setIsLoggedIn(true)
           return
@@ -233,6 +264,32 @@ export default function App() {
     }
   }, [])
 
+  React.useEffect(() => {
+    if (!isLoggedIn || !accessToken || !providerId) {
+      return
+    }
+    const token = accessToken
+    const pid = providerId
+    let cancelled = false
+
+    async function syncProviderProfile() {
+      try {
+        const profile = await fetchProviderProfile(token, pid, loggedInUsername)
+        if (cancelled) return
+        setProviderProfile(profile)
+        await savePersistedProviderProfile(pid, profile)
+      } catch {
+        // Keep existing/cached profile on failure.
+      }
+    }
+
+    void syncProviderProfile()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isLoggedIn, accessToken, providerId, loggedInUsername])
+
   async function handleLogin(username: string, password: string) {
     if (isLoggingIn) {
       return
@@ -249,6 +306,13 @@ export default function App() {
         username: normalizedUsername,
         user,
       })
+      setProviderId(user.providerId)
+      if (user.providerId) {
+        const cachedProfile = await loadPersistedProviderProfile(user.providerId)
+        setProviderProfile(cachedProfile)
+      } else {
+        setProviderProfile(null)
+      }
 
       setAccessToken(result.accessToken)
       setLoggedInUsername(normalizedUsername)
@@ -278,12 +342,19 @@ export default function App() {
     } catch {
       storageClearFailed = true
     } finally {
+      try {
+        await clearPersistedProviderProfile()
+      } catch {
+        // Do not block logout on provider profile storage cleanup.
+      }
       clearSoapFlowTimers()
       setSoapFlowPhase('idle')
       setPatientDemoEncounterId(null)
       setIsLoggedIn(false)
       setLoggedInUsername('')
       setAccessToken(null)
+      setProviderId(null)
+      setProviderProfile(null)
       setPatient(null)
       setCurrentPage('home')
       toast.info('Signed out')
@@ -301,8 +372,9 @@ export default function App() {
 
   function handleSelectPatient(p: Patient) {
     setPatient(p)
+    const name = patientDisplayName(p)
     toast.success(
-      patientSheetIntent === 'match' ? `Patient matched: ${p.name}` : `Patient selected: ${p.name}`,
+      patientSheetIntent === 'match' ? `Patient matched: ${name}` : `Patient selected: ${name}`,
     )
   }
 
@@ -313,6 +385,11 @@ export default function App() {
   }
 
   const handleTapMatchPatient = React.useCallback(async () => {
+    if (!accessToken) {
+      toast.warning('Please sign in before matching a patient from EMR.')
+      return
+    }
+
     const requestId = `demographics-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     try {
       logEmrDebug('sidepanel', 'start demographics extraction', { requestId })
@@ -345,13 +422,52 @@ export default function App() {
         console.log('[FastDoc] Demographics section text:', demographics.demographicsText ?? '')
 
         const text = demographics.demographicsText ?? ''
-        const parsed = parsePatientFromDemographicsText(text)
+        if (!text.trim()) {
+          toast.warning('Demographics text is empty in this EMR section')
+          return
+        }
+        const parsedPayload = await parseDemographicsTextWithLlm(accessToken, text)
+        const parsed: Patient | null = parsedPayload.dateOfBirth
+          ? {
+              id: parsedPayload.clinicPatientId
+                ? `emr-${parsedPayload.clinicPatientId}`
+                : `emr-${Date.now()}`,
+              firstName: parsedPayload.firstName,
+              lastName: parsedPayload.lastName,
+              dateOfBirth: parsedPayload.dateOfBirth,
+              gender: parsedPayload.gender ?? undefined,
+              primaryLanguage: parsedPayload.primaryLanguage,
+              clinicPatientId: parsedPayload.clinicPatientId,
+              clinicId: providerProfile?.clinicId ?? null,
+              divisionId: providerProfile?.divisionId ?? null,
+              clinicSystem: providerProfile?.clinicSystem ?? providerProfile?.siteLabel ?? null,
+              clinicName: providerProfile?.clinicName ?? null,
+              isActive: true,
+              demographics:
+                parsedPayload.demographics == null
+                  ? null
+                  : {
+                      phone: parsedPayload.demographics.phone ?? null,
+                      email: parsedPayload.demographics.email ?? null,
+                      addressLine1: parsedPayload.demographics.addressLine1 ?? null,
+                      city: parsedPayload.demographics.city ?? null,
+                      state: parsedPayload.demographics.state ?? null,
+                      zipCode: parsedPayload.demographics.zipCode ?? null,
+                      country: null,
+                    },
+            }
+          : parsePatientFromDemographicsText(text)
         if (parsed != null) {
-          setPatient({
+          const alignedPatient: Patient = {
             ...parsed,
-            emrDemographicsSnapshot: text.trim(),
-          })
-          toast.success(`Patient selected: ${parsed.name}`)
+            clinicId: parsed.clinicId ?? providerProfile?.clinicId ?? null,
+            divisionId: parsed.divisionId ?? providerProfile?.divisionId ?? null,
+            clinicSystem:
+              parsed.clinicSystem ?? providerProfile?.clinicSystem ?? providerProfile?.siteLabel ?? null,
+            clinicName: parsed.clinicName ?? providerProfile?.clinicName ?? null,
+          }
+          setPatient(alignedPatient)
+          toast.success(`Patient selected: ${patientDisplayName(alignedPatient)}`)
         } else {
           toast.warning('Demographics captured but patient fields could not be parsed (need DOB in MM/DD/YYYY)')
         }
@@ -365,7 +481,7 @@ export default function App() {
       const errorMessage = error instanceof Error ? error.message : 'Failed to extract demographics'
       toast.warning(errorMessage)
     }
-  }, [])
+  }, [accessToken, providerProfile])
 
   const handleSyncSoapToEmr = React.useCallback(async (payload: SyncChiefComplaintPayload) => {
     const requestId = `sync-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -460,6 +576,9 @@ export default function App() {
           <HomePage
             patient={patient}
             username={loggedInUsername}
+            doctorDisplayName={providerProfile ? providerDisplayName(providerProfile) : undefined}
+            providerSpecialty={providerProfile?.specialty}
+            clinicSiteLabel={providerProfile?.siteLabel}
             onChangePatient={() => openPatientSheet('select')}
             onClearSelectedPatient={() => setPatient(null)}
             onOpenMatchPatientPicker={() => openPatientSheet('match')}
@@ -497,12 +616,14 @@ export default function App() {
             isDark={isDark}
             onToggleDark={setIsDark}
             onLogout={handleLogout}
-            username={loggedInUsername || undefined}
+            username={providerProfile ? providerDisplayName(providerProfile) : loggedInUsername || undefined}
+            providerSpecialty={providerProfile?.specialty}
+            clinicName={providerProfile?.clinicName}
             onOpenProvider={openProviderPage}
           />
         )}
         {currentPage === 'provider' && (
-          <ProviderPage provider={getProviderProfile(loggedInUsername)} />
+          <ProviderPage provider={providerProfile ?? getProviderProfile(loggedInUsername)} />
         )}
         {currentPage === 'patient-demographic' && patientDemographicPayload && (
           <PatientDemographicPage demographic={patientDemographicPayload} />

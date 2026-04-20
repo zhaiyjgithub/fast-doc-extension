@@ -193,6 +193,10 @@ function formatDob(iso: string) {
   return format(d, 'MM/dd/yyyy')
 }
 
+function patientDisplayName(patient: Patient): string {
+  return `${patient.firstName} ${patient.lastName}`.trim()
+}
+
 const fabCopyExport = [
   { icon: Copy, label: 'Copy', action: 'copy' as const },
   { icon: RefreshCw, label: 'Sync', action: 'sync' as const },
@@ -663,16 +667,22 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
       <div className="flex min-w-0 items-center gap-3">
         <Avatar className="size-12 shrink-0 border-2 border-background">
           <AvatarFallback className="bg-primary/30 text-sm font-bold text-primary">
-            {patient ? initialsFromName(patient.name) : '—'}
+            {patient ? initialsFromName(patientDisplayName(patient)) : '—'}
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0">
           <h2 className="truncate font-bold text-foreground">
-            {patient?.name ?? 'Select a patient'}
+            {patient ? patientDisplayName(patient) : 'Select a patient'}
           </h2>
           <p className="text-xs text-muted-foreground">
             {patient
-              ? `DOB: ${formatDob(patient.dob)}${patient.idNumber ? ` • ${patient.idNumber}` : ''}`
+              ? `DOB: ${formatDob(patient.dateOfBirth)}${
+                  patient.clinicPatientId
+                    ? ` • Patient ID ${patient.clinicPatientId}`
+                    : patient.mrn
+                      ? ` • ${patient.mrn}`
+                      : ''
+                }`
               : onOpenPatientPicker
                 ? 'Tap to open the patient list and attach this note.'
                 : 'Select a patient from the toolbar to attach this note.'}

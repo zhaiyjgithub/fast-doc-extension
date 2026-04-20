@@ -1,8 +1,13 @@
 export interface ProviderProfile {
+  providerId?: string
   firstName: string
   lastName: string
+  credentials?: string
   specialty: string
   email: string
+  clinicId?: string | null
+  divisionId?: string | null
+  clinicSystem?: string | null
   clinicName: string
   siteLabel: string
 }
@@ -32,6 +37,7 @@ export function getProviderProfile(username: string): ProviderProfile {
   return {
     firstName,
     lastName,
+    credentials: 'MD',
     specialty: 'Primary care',
     email,
     clinicName: 'Riverside Family Medicine',
@@ -40,7 +46,9 @@ export function getProviderProfile(username: string): ProviderProfile {
 }
 
 export function providerDisplayName(p: ProviderProfile): string {
-  return `${p.firstName} ${p.lastName}`.trim()
+  const base = `${p.firstName} ${p.lastName}`.trim()
+  const cred = p.credentials?.trim()
+  return cred ? `${base}, ${cred}` : base
 }
 
 export function providerInitials(p: ProviderProfile): string {

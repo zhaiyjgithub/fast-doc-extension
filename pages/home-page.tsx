@@ -74,7 +74,10 @@ function doctorHeaderLabel(username: string, explicit?: string): string {
 }
 
 function nameForAvatarColor(doctorLabel: string): string {
-  return doctorLabel.replace(/^dr\.?\s+/i, '').trim() || doctorLabel
+  const withoutPrefix = doctorLabel.replace(/^dr\.?\s+/i, '').trim()
+  // Ignore trailing credentials for avatar color/initial seed.
+  const baseName = withoutPrefix.split(',')[0]?.trim() || withoutPrefix
+  return baseName || doctorLabel
 }
 
 function initialsForDoctor(doctorLabel: string): string {
@@ -102,6 +105,7 @@ export function HomePage({
   const doctorLabel = doctorHeaderLabel(username, doctorDisplayNameProp)
   const avatarColorSeed = nameForAvatarColor(doctorLabel)
   const doctorInitials = initialsForDoctor(doctorLabel)
+  const patientName = patient ? `${patient.firstName} ${patient.lastName}`.trim() : ''
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
@@ -158,8 +162,8 @@ export function HomePage({
           transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
         >
           <PatientBanner
-            name={patient.name}
-            dob={patient.dob}
+            name={patientName}
+            dob={patient.dateOfBirth}
             gender={patient.gender}
             onDismiss={onClearSelectedPatient}
           />
