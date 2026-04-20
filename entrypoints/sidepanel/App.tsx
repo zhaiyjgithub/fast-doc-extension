@@ -14,6 +14,14 @@ import { SoapSuccessPage } from '@/pages/soap-success-page'
 import { PatientDemographicPage } from '@/pages/patient-demographic-page'
 import { ProviderPage } from '@/pages/provider-page'
 import { SettingsPage } from '@/pages/settings-page'
+import {
+  AuthApiError,
+  fetchCurrentUser,
+  loginWithPassword,
+  logoutProvider,
+  refreshProviderToken,
+} from '@/lib/auth-api'
+import { clearAuthSession, loadAuthSession, saveAuthSession } from '@/lib/auth-session'
 import { getProviderProfile } from '@/lib/mock-provider'
 import { getDemographicByEncounterId } from '@/lib/patient-demographic'
 import { parsePatientFromDemographicsText } from '@/lib/parse-emr-demographics-patient'
@@ -75,9 +83,11 @@ const NAV_TABS: NavTab[] = [
 ]
 
 export default function App() {
+  const [isBootstrappingAuth, setIsBootstrappingAuth] = React.useState(true)
   const [isLoggedIn, setIsLoggedIn] = React.useState(false)
   const [isLoggingIn, setIsLoggingIn] = React.useState(false)
   const [loggedInUsername, setLoggedInUsername] = React.useState('')
+  const [accessToken, setAccessToken] = React.useState<string | null>(null)
   const [currentPage, setCurrentPage] = React.useState<AppPage>('home')
   const [patient, setPatient] = React.useState<Patient | null>(null)
   const [patientSheetOpen, setPatientSheetOpen] = React.useState(false)
@@ -148,25 +158,140 @@ export default function App() {
     document.documentElement.classList.toggle('dark', isDark)
   }, [isDark])
 
-  function handleLogin(username: string, _password: string) {
+  React.useEffect(() => {
+    let cancelled = false
+
+    async function bootstrapAuthSession() {
+      try {
+        const persistedSession = await loadAuthSession()
+        if (!persistedSession) {
+          return
+        }
+
+        let meError: unknown = null
+        try {
+          const user = await fetchCurrentUser(persistedSession.accessToken)
+          if (cancelled) return
+          setAccessToken(persistedSession.accessToken)
+          setLoggedInUsername(user.email)
+          setIsLoggedIn(true)
+          await saveAuthSession({
+            accessToken: persistedSession.accessToken,
+            refreshToken: persistedSession.refreshToken,
+            username: user.email,
+            user,
+          })
+          return
+        } catch (error) {
+          meError = error
+        }
+
+        const shouldAttemptRefresh =
+          meError instanceof AuthApiError && meError.status === 401
+
+        if (!shouldAttemptRefresh) {
+          return
+        }
+
+        try {
+          const refreshed = await refreshProviderToken(persistedSession.refreshToken)
+          await saveAuthSession({
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+            username: persistedSession.username,
+            user: persistedSession.user,
+          })
+
+          const refreshedUser = await fetchCurrentUser(refreshed.accessToken)
+          if (cancelled) return
+          await saveAuthSession({
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+            username: refreshedUser.email,
+            user: refreshedUser,
+          })
+          setAccessToken(refreshed.accessToken)
+          setLoggedInUsername(refreshedUser.email)
+          setIsLoggedIn(true)
+          return
+        } catch {
+          await clearAuthSession()
+        }
+      } catch {
+        await clearAuthSession()
+      } finally {
+        if (!cancelled) {
+          setIsBootstrappingAuth(false)
+        }
+      }
+    }
+
+    void bootstrapAuthSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function handleLogin(username: string, password: string) {
+    if (isLoggingIn) {
+      return
+    }
     setIsLoggingIn(true)
-    setTimeout(() => {
-      setLoggedInUsername(username.trim() || 'Doctor')
+    try {
+      const result = await loginWithPassword(username, password)
+      const user = await fetchCurrentUser(result.accessToken)
+      const normalizedUsername = user.email.trim() || username.trim() || 'Doctor'
+
+      await saveAuthSession({
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        username: normalizedUsername,
+        user,
+      })
+
+      setAccessToken(result.accessToken)
+      setLoggedInUsername(normalizedUsername)
       setIsLoggedIn(true)
+      toast.success(`Welcome back, ${normalizedUsername}!`)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unable to sign in right now.'
+      toast.warning(errorMessage)
+    } finally {
       setIsLoggingIn(false)
-      toast.success(`Welcome back, ${username}!`)
-    }, 800)
+    }
   }
 
-  function handleLogout() {
-    clearSoapFlowTimers()
-    setSoapFlowPhase('idle')
-    setPatientDemoEncounterId(null)
-    setIsLoggedIn(false)
-    setLoggedInUsername('')
-    setPatient(null)
-    setCurrentPage('home')
-    toast.info('Signed out')
+  async function handleLogout() {
+    const tokenForLogout = accessToken
+    if (tokenForLogout) {
+      try {
+        await logoutProvider(tokenForLogout)
+      } catch {
+        // Best effort: local logout should still complete.
+      }
+    }
+
+    let storageClearFailed = false
+    try {
+      await clearAuthSession()
+    } catch {
+      storageClearFailed = true
+    } finally {
+      clearSoapFlowTimers()
+      setSoapFlowPhase('idle')
+      setPatientDemoEncounterId(null)
+      setIsLoggedIn(false)
+      setLoggedInUsername('')
+      setAccessToken(null)
+      setPatient(null)
+      setCurrentPage('home')
+      toast.info('Signed out')
+    }
+
+    if (storageClearFailed) {
+      toast.warning('Signed out locally, but failed to clear saved session.')
+    }
   }
 
   function openPatientSheet(intent: 'select' | 'match') {
@@ -292,6 +417,16 @@ export default function App() {
 
   const patientDemographicPayload =
     patientDemoEncounterId != null ? getDemographicByEncounterId(patientDemoEncounterId) : null
+
+  if (isBootstrappingAuth) {
+    return (
+      <AppShell>
+        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+          Restoring session...
+        </div>
+      </AppShell>
+    )
+  }
 
   if (!isLoggedIn) {
     return (
