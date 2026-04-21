@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { EncounterCodeBadges } from '@/components/encounter-code-badges'
 import { PatientBanner } from '@/components/layout/patient-banner'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -7,7 +6,7 @@ import { Bell, Mic, Search, UserRoundSearch } from 'lucide-react'
 import { motion, type Variants } from 'motion/react'
 import { toast } from 'sonner'
 import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
-import { formatEncounterDob, MOCK_ENCOUNTERS } from '@/lib/mock-encounters'
+import type { EncounterSummary } from '@/lib/encounter-api'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
 
@@ -44,6 +43,8 @@ interface HomePageProps {
   /** Opens patient sheet in match mode (same as Record tab match flow). */
   onOpenMatchPatientPicker?: () => void
   onNavigate: (page: 'recording' | 'soap') => void
+  encounters: EncounterSummary[]
+  onOpenEncounter: (encounterId: string) => void
   /** Opens patient demographics for an encounter (name row). */
   onOpenEncounterPatient?: (encounterId: string) => void
 }
@@ -90,6 +91,27 @@ function initialsForDoctor(doctorLabel: string): string {
   return (parts[0]?.charAt(0) ?? '?').toUpperCase()
 }
 
+function shortPatientId(patientId: string): string {
+  const compact = patientId.replace(/[^a-zA-Z0-9]/g, '')
+  if (compact.length >= 8) {
+    return compact.slice(0, 8)
+  }
+  return patientId.slice(0, 8) || patientId
+}
+
+function formatEncounterTime(timestamp: string): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) {
+    return timestamp
+  }
+  return date.toLocaleString([], {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 export function HomePage({
   patient,
   username = '',
@@ -100,6 +122,8 @@ export function HomePage({
   onClearSelectedPatient,
   onOpenMatchPatientPicker,
   onNavigate,
+  encounters,
+  onOpenEncounter,
   onOpenEncounterPatient,
 }: HomePageProps) {
   const doctorLabel = doctorHeaderLabel(username, doctorDisplayNameProp)
@@ -223,62 +247,66 @@ export function HomePage({
           <motion.section variants={homePageItemVariants} className="space-y-4">
             <h2 className="text-lg font-bold text-foreground">Recent encounters</h2>
             <div className="space-y-3">
-              {MOCK_ENCOUNTERS.map((e) => (
+              {encounters.map((encounter) => {
+                const patientLabel = `Patient ${shortPatientId(encounter.patientId)}`
+                return (
                 <div
-                  key={e.id}
-                  className={cn(
-                    'flex w-full cursor-pointer items-center gap-4 rounded-lg border border-border/60 bg-card p-4 text-left transition-colors hover:bg-muted/40 active:scale-[0.99]',
-                    e.muted && 'opacity-80',
-                  )}
-                  onClick={() => onNavigate('soap')}
+                  key={encounter.id}
+                  className="flex w-full cursor-pointer items-center gap-4 rounded-lg border border-border/60 bg-card p-4 text-left transition-colors hover:bg-muted/40 active:scale-[0.99]"
+                  onClick={() => onOpenEncounter(encounter.id)}
                   role="presentation"
                 >
                   <Avatar className="size-12 shrink-0 rounded-full">
                     <AvatarFallback
-                      className={cn('text-xs font-semibold', avatarFallbackClassForName(e.name))}
+                      className={cn('text-xs font-semibold', avatarFallbackClassForName(patientLabel))}
                     >
-                      {e.initials}
+                      {shortPatientId(encounter.patientId).slice(0, 2).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-start justify-between gap-2">
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-0 overflow-hidden rounded-sm border-0 bg-transparent p-0 text-left font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={(ev) => {
-                          ev.stopPropagation()
-                          onOpenEncounterPatient?.(e.id)
-                        }}
-                        aria-label={`View demographics for ${e.name}`}
-                      >
-                        <span className="min-w-0 flex-1 truncate font-bold text-foreground underline-offset-4 decoration-2 decoration-foreground hover:font-extrabold hover:underline">
-                          {e.name}
+                      {onOpenEncounterPatient ? (
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-0 overflow-hidden rounded-sm border-0 bg-transparent p-0 text-left font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={(ev) => {
+                            ev.stopPropagation()
+                            onOpenEncounterPatient(encounter.id)
+                          }}
+                          aria-label={`View demographics for ${patientLabel}`}
+                        >
+                          <span className="min-w-0 flex-1 truncate font-bold text-foreground underline-offset-4 decoration-2 decoration-foreground hover:font-extrabold hover:underline">
+                            {patientLabel}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="min-w-0 flex-1 truncate font-bold text-foreground">
+                          {patientLabel}
                         </span>
-                        <span className="shrink-0">, {e.age}</span>
-                      </button>
+                      )}
                       <p className="shrink-0 pl-2 text-right text-[11px] font-semibold leading-snug text-muted-foreground whitespace-nowrap">
-                        {e.when}
+                        {formatEncounterTime(encounter.encounterTime)}
                       </p>
                     </div>
                     <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                      DOB {formatEncounterDob(e.dob)}
-                      <span className="text-muted-foreground/60"> · </span>
-                      {e.gender}
+                      {encounter.careSetting}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <span
-                        className={cn(
-                          'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase',
-                          e.tagClass,
-                        )}
+                        className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold uppercase text-secondary-foreground"
                       >
-                        {e.tag}
+                        {encounter.status}
                       </span>
                     </div>
-                    <EncounterCodeBadges icdCodes={e.icdCodes} cptCodes={e.cptCodes} />
                   </div>
                 </div>
-              ))}
+                )
+              })}
+              {encounters.length === 0 && (
+                <p className="rounded-lg border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
+                  No encounters available for today yet.
+                </p>
+              )}
             </div>
           </motion.section>
 

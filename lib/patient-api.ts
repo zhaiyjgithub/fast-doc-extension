@@ -13,6 +13,16 @@ type ParseDemographicsRequest = {
   clinicName?: string | null
 }
 
+export class PatientApiError extends Error {
+  status?: number
+
+  constructor(message: string, status?: number) {
+    super(message)
+    this.name = 'PatientApiError'
+    this.status = status
+  }
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -111,7 +121,7 @@ export async function parseDemographicsTextWithLlm(
       clinic_name: request.clinicName ?? undefined,
     }),
   }).catch(() => {
-    throw new Error('Unable to reach FastDoc demographics parse API.')
+    throw new PatientApiError('Unable to reach FastDoc demographics parse API.')
   })
 
   const body = await response.json().catch(() => null)
@@ -122,7 +132,7 @@ export async function parseDemographicsTextWithLlm(
         : isPlainObject(body) && isPlainObject(body.data) && typeof body.data.message === 'string'
           ? body.data.message
           : null
-    throw new Error(detail ?? 'Failed to parse demographics text.')
+    throw new PatientApiError(detail ?? 'Failed to parse demographics text.', response.status)
   }
   return parsePayload(body)
 }

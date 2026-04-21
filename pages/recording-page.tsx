@@ -148,7 +148,7 @@ function liveLinesForElapsed(seconds: number): LiveLine[] {
 
 interface RecordingPageProps {
   patient?: Patient | null
-  onGenerateEMR: (transcript: string) => void
+  onGenerateEMR: (transcript: string, conversationDurationSeconds?: number) => void
   /** Opens patient search sheet (e.g. from empty-state CTA or Search). */
   onOpenPatientPicker?: () => void
   /** Optional callback when tapping “match patient” (e.g. scrape EMR demographics into visit context). */
@@ -929,7 +929,7 @@ export function RecordingPage({
                     className="h-10 flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
                     onClick={() => {
                       if (!requirePatientOrMatch()) return
-                      onGenerateEMR(transcript)
+                      onGenerateEMR(transcript, elapsedTime)
                     }}
                     disabled={!transcript.trim()}
                   >
@@ -1159,7 +1159,7 @@ export function RecordingPage({
                     </div>
                     <Button
                       className="h-12 w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                      onClick={() => onGenerateEMR(transcript)}
+                      onClick={() => onGenerateEMR(transcript, elapsedTime)}
                       disabled={!transcript.trim()}
                     >
                       <Sparkles className="mr-2 size-4" />

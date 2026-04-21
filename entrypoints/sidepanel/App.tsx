@@ -10,7 +10,7 @@ import { NotesPage } from '@/pages/notes-page'
 import { RecordingPage } from '@/pages/recording-page'
 import { SoapPage } from '@/pages/soap-page'
 import { SoapGeneratingPage } from '@/pages/soap-generating-page'
-import { SoapSuccessPage } from '@/pages/soap-success-page'
+import { TranscriptPage } from '@/pages/transcript-page'
 import { PatientDemographicPage } from '@/pages/patient-demographic-page'
 import { ProviderPage } from '@/pages/provider-page'
 import { SettingsPage } from '@/pages/settings-page'
@@ -24,13 +24,22 @@ import {
 import { clearAuthSession, loadAuthSession, saveAuthSession } from '@/lib/auth-session'
 import { fetchProviderProfile } from '@/lib/provider-api'
 import {
+  createEncounter,
+  EncounterApiError,
+  getEncounter,
+  listEncounters,
+  type EncounterSummary,
+} from '@/lib/encounter-api'
+import { EmrApiError, generateEmr } from '@/lib/emr-api'
+import { ReportApiError, getEncounterReport, type EncounterReport } from '@/lib/report-api'
+import {
   clearPersistedProviderProfile,
   loadPersistedProviderProfile,
   savePersistedProviderProfile,
 } from '@/lib/provider-session'
 import { getProviderProfile, providerDisplayName, type ProviderProfile } from '@/lib/mock-provider'
 import { getDemographicByEncounterId } from '@/lib/patient-demographic'
-import { parseDemographicsTextWithLlm } from '@/lib/patient-api'
+import { PatientApiError, parseDemographicsTextWithLlm } from '@/lib/patient-api'
 import { Home, FileText, Mic, Settings } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -39,10 +48,11 @@ type AppPage =
   | 'notes'
   | 'recording'
   | 'soap'
+  | 'transcript'
   | 'settings'
   | 'patient-demographic'
   | 'provider'
-type SoapFlowPhase = 'idle' | 'generating' | 'success'
+type SoapFlowPhase = 'idle' | 'generating'
 type ExtractEmrDemographicsResponse = {
   ok?: boolean
   data?: {
@@ -70,6 +80,7 @@ type SyncChiefComplaintPayload = {
 }
 
 const DEBUG_EMR_BRIDGE = true
+const NOTES_PAGE_SIZE = 10
 
 function patientDisplayName(patient: Patient): string {
   return `${patient.firstName} ${patient.lastName}`.trim()
@@ -83,6 +94,15 @@ function logEmrDebug(scope: string, message: string, details?: unknown) {
   } else {
     console.log(`${prefix} ${message}`, details)
   }
+}
+
+function errorStatusCode(error: unknown): number | null {
+  if (error instanceof AuthApiError && typeof error.status === 'number') return error.status
+  if (error instanceof EncounterApiError && typeof error.status === 'number') return error.status
+  if (error instanceof ReportApiError && typeof error.status === 'number') return error.status
+  if (error instanceof EmrApiError && typeof error.status === 'number') return error.status
+  if (error instanceof PatientApiError && typeof error.status === 'number') return error.status
+  return null
 }
 
 const NAV_TABS: NavTab[] = [
@@ -106,39 +126,307 @@ export default function App() {
   const [patientSheetIntent, setPatientSheetIntent] = React.useState<'select' | 'match'>('select')
   const [isDark, setIsDark] = React.useState(false)
   const [soapFlowPhase, setSoapFlowPhase] = React.useState<SoapFlowPhase>('idle')
-  const soapGenTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const soapSuccessTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const [patientDemoEncounterId, setPatientDemoEncounterId] = React.useState<string | null>(null)
   const [patientDemoReturnTab, setPatientDemoReturnTab] = React.useState<'home' | 'notes'>('home')
+  const [activeEncounterId, setActiveEncounterId] = React.useState<string | null>(null)
+  const [activeEncounterSummary, setActiveEncounterSummary] = React.useState<EncounterSummary | null>(
+    null,
+  )
+  const [activeEncounterDetail, setActiveEncounterDetail] = React.useState<EncounterSummary | null>(null)
+  const [activeEncounterReport, setActiveEncounterReport] = React.useState<EncounterReport | null>(null)
+  const [homeEncounters, setHomeEncounters] = React.useState<EncounterSummary[]>([])
+  const [notesEncounters, setNotesEncounters] = React.useState<EncounterSummary[]>([])
+  const [notesPage, setNotesPage] = React.useState(1)
+  const [notesHasMore, setNotesHasMore] = React.useState(false)
+  const [transcriptReturnPage, setTranscriptReturnPage] = React.useState<AppPage>('soap')
 
-  function clearSoapFlowTimers() {
-    if (soapGenTimerRef.current) {
-      clearTimeout(soapGenTimerRef.current)
-      soapGenTimerRef.current = null
+  const expireSessionAndRedirectToLogin = React.useCallback(async () => {
+    try {
+      await clearAuthSession()
+    } catch {
+      // no-op
     }
-    if (soapSuccessTimerRef.current) {
-      clearTimeout(soapSuccessTimerRef.current)
-      soapSuccessTimerRef.current = null
+    try {
+      await clearPersistedProviderProfile()
+    } catch {
+      // no-op
     }
-  }
+    setSoapFlowPhase('idle')
+    setPatientDemoEncounterId(null)
+    setIsLoggedIn(false)
+    setLoggedInUsername('')
+    setAccessToken(null)
+    setProviderId(null)
+    setProviderProfile(null)
+    setPatient(null)
+    setActiveEncounterId(null)
+    setActiveEncounterSummary(null)
+    setActiveEncounterDetail(null)
+    setActiveEncounterReport(null)
+    setHomeEncounters([])
+    setNotesEncounters([])
+    setNotesPage(1)
+    setNotesHasMore(false)
+    setCurrentPage('home')
+    toast.warning('Session expired. Please sign in again.')
+  }, [])
 
-  function handleGenerateEMR(_transcript: string) {
-    setCurrentPage('soap')
-    setSoapFlowPhase('generating')
-    clearSoapFlowTimers()
-    soapGenTimerRef.current = setTimeout(() => {
-      setSoapFlowPhase('success')
-      soapGenTimerRef.current = null
-      soapSuccessTimerRef.current = setTimeout(() => {
+  const withAuthRetry = React.useCallback(
+    async <T,>(request: (token: string) => Promise<T>): Promise<T> => {
+      const token = accessToken?.trim()
+      if (!token) {
+        await expireSessionAndRedirectToLogin()
+        throw new Error('Session expired. Please sign in again.')
+      }
+
+      try {
+        return await request(token)
+      } catch (error) {
+        if (errorStatusCode(error) !== 401) {
+          throw error
+        }
+      }
+
+      const persisted = await loadAuthSession()
+      const refreshToken = persisted?.refreshToken?.trim()
+      if (!refreshToken) {
+        await expireSessionAndRedirectToLogin()
+        throw new Error('Session expired. Please sign in again.')
+      }
+
+      try {
+        const refreshed = await refreshProviderToken(refreshToken)
+        const refreshedUser = await fetchCurrentUser(refreshed.accessToken)
+        await saveAuthSession({
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken,
+          username: refreshedUser.email,
+          user: refreshedUser,
+        })
+        setAccessToken(refreshed.accessToken)
+        setProviderId(refreshedUser.providerId)
+        if (refreshedUser.providerId) {
+          const cachedProfile = await loadPersistedProviderProfile(refreshedUser.providerId)
+          setProviderProfile(cachedProfile)
+        } else {
+          setProviderProfile(null)
+        }
+        setLoggedInUsername(refreshedUser.email)
+        setIsLoggedIn(true)
+        return await request(refreshed.accessToken)
+      } catch {
+        await expireSessionAndRedirectToLogin()
+        throw new Error('Session expired. Please sign in again.')
+      }
+    },
+    [accessToken, expireSessionAndRedirectToLogin],
+  )
+
+  const refreshTodayEncounters = React.useCallback(
+    async (showToastOnError = true) => {
+      if (!accessToken || !isLoggedIn) {
+        setHomeEncounters([])
+        return [] as EncounterSummary[]
+      }
+
+      try {
+        const encounters = await withAuthRetry((token) =>
+          listEncounters(token, { todayOnly: true, page: 1, pageSize: 20 }),
+        )
+        setHomeEncounters(encounters)
+        return encounters
+      } catch (error) {
+        if (showToastOnError) {
+          const message =
+            error instanceof Error ? error.message : 'Unable to load today encounters right now.'
+          toast.warning(message)
+        }
+        return [] as EncounterSummary[]
+      }
+    },
+    [isLoggedIn, withAuthRetry],
+  )
+
+  const loadNotesEncountersPage = React.useCallback(
+    async (page: number, showToastOnError = true) => {
+      if (!accessToken || !isLoggedIn) {
+        setNotesEncounters([])
+        setNotesHasMore(false)
+        return
+      }
+
+      try {
+        const encounters = await withAuthRetry((token) =>
+          listEncounters(token, { page, pageSize: NOTES_PAGE_SIZE }),
+        )
+        setNotesEncounters(encounters)
+        setNotesHasMore(encounters.length >= NOTES_PAGE_SIZE)
+      } catch (error) {
+        setNotesEncounters([])
+        setNotesHasMore(false)
+        if (showToastOnError) {
+          const message = error instanceof Error ? error.message : 'Unable to load encounters for notes.'
+          toast.warning(message)
+        }
+      }
+    },
+    [isLoggedIn, withAuthRetry],
+  )
+
+  const openEncounterInSoap = React.useCallback(
+    async (encounterId: string, summary?: EncounterSummary) => {
+      if (!isLoggedIn || !accessToken) {
+        toast.warning('Please sign in to open encounter notes.')
+        return
+      }
+
+      const id = encounterId.trim()
+      if (!id) {
+        toast.warning('Encounter is missing an ID.')
+        return
+      }
+
+      setActiveEncounterId(id)
+      if (summary) {
+        setActiveEncounterSummary(summary)
+      }
+      if (summary && patient?.id !== summary.patientId) {
+        setPatient(null)
+      }
+
+      try {
+        const detail = await withAuthRetry((token) => getEncounter(token, id))
+        setActiveEncounterDetail(detail)
+        setActiveEncounterSummary(summary ?? detail)
+
+        try {
+          const report = await withAuthRetry((token) => getEncounterReport(token, id))
+          setActiveEncounterReport(report)
+          setCurrentPage('soap')
+          setSoapFlowPhase('idle')
+          return
+        } catch (error) {
+          if (error instanceof ReportApiError && error.status === 404) {
+            setActiveEncounterReport(null)
+            setCurrentPage('recording')
+            setSoapFlowPhase('idle')
+            toast.message('This encounter has no EMR note yet. Start a new recording.')
+            return
+          }
+          throw error
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to open encounter report right now.'
+        toast.warning(message)
         setSoapFlowPhase('idle')
-        soapSuccessTimerRef.current = null
+      }
+    },
+    [
+      accessToken,
+      activeEncounterDetail,
+      activeEncounterId,
+      activeEncounterReport,
+      activeEncounterSummary,
+      isLoggedIn,
+      patient?.id,
+      withAuthRetry,
+    ],
+  )
+
+  const handleGenerateEMR = React.useCallback(
+    async (transcript: string, conversationDurationSeconds?: number) => {
+      if (!isLoggedIn || !accessToken) {
+        toast.warning('Please sign in before generating EMR.')
+        return
+      }
+      if (!patient?.id) {
+        toast.warning('Select a patient before generating EMR.')
+        return
+      }
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      if (!UUID_RE.test(patient.id)) {
+        toast.warning('Please use "Tap to match patient" to select a real patient before generating EMR.')
+        return
+      }
+      const trimmedTranscript = transcript.trim()
+      if (!trimmedTranscript) {
+        toast.warning('Transcript is empty. Please record or paste consultation text first.')
+        return
+      }
+
+      // Phase 1: find or create encounter — stay on recording page so errors are shown here
+      let encounter: EncounterSummary | null = null
+      try {
+        if (activeEncounterDetail?.patientId === patient.id) {
+          encounter = activeEncounterDetail
+        } else if (activeEncounterSummary?.patientId === patient.id) {
+          encounter = activeEncounterSummary
+        }
+
+        if (!encounter) {
+          encounter = await withAuthRetry((token) =>
+            createEncounter(token, {
+              patientId: patient.id,
+              providerId,
+            }),
+          )
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to create encounter.'
+        toast.warning(message)
+        return
+      }
+
+      const encounterId = encounter.id
+      setActiveEncounterId(encounterId)
+      setActiveEncounterSummary(encounter)
+
+      // Phase 2: navigate to SOAP generating, then run EMR generation
+      setCurrentPage('soap')
+      setSoapFlowPhase('generating')
+
+      try {
+        await withAuthRetry((token) =>
+          generateEmr(token, {
+            encounterId,
+            patientId: patient.id,
+            providerId,
+            transcript: trimmedTranscript,
+            conversationDurationSeconds,
+          }),
+        )
+
+        const [detail, report] = await Promise.all([
+          withAuthRetry((token) => getEncounter(token, encounterId)),
+          withAuthRetry((token) => getEncounterReport(token, encounterId)),
+        ])
+        setActiveEncounterDetail(detail)
+        setActiveEncounterSummary(detail)
+        setActiveEncounterReport(report)
+        await refreshTodayEncounters(false)
         toast.success('SOAP note ready')
-      }, 1500)
-    }, 3500)
-  }
+      } catch (error) {
+        // EMR generation failed after navigating — go back to recording page
+        const message = error instanceof Error ? error.message : 'Failed to generate EMR. Please try again.'
+        toast.warning(message)
+        setCurrentPage('recording')
+      } finally {
+        setSoapFlowPhase('idle')
+      }
+    },
+    [
+      accessToken,
+      activeEncounterDetail,
+      activeEncounterSummary,
+      isLoggedIn,
+      patient,
+      providerId,
+      refreshTodayEncounters,
+      withAuthRetry,
+    ],
+  )
 
   function handleNavChange(id: AppPage) {
-    clearSoapFlowTimers()
     setSoapFlowPhase('idle')
     setPatientDemoEncounterId(null)
     setCurrentPage(id)
@@ -162,8 +450,6 @@ export default function App() {
   function closeProviderPage() {
     setCurrentPage('settings')
   }
-
-  React.useEffect(() => () => clearSoapFlowTimers(), [])
 
   // Sync dark mode class on <html>
   React.useEffect(() => {
@@ -289,6 +575,20 @@ export default function App() {
     }
   }, [isLoggedIn, accessToken, providerId, loggedInUsername])
 
+  React.useEffect(() => {
+    if (currentPage !== 'home') {
+      return
+    }
+    void refreshTodayEncounters(false)
+  }, [currentPage, refreshTodayEncounters])
+
+  React.useEffect(() => {
+    if (currentPage !== 'notes') {
+      return
+    }
+    void loadNotesEncountersPage(notesPage, false)
+  }, [currentPage, loadNotesEncountersPage, notesPage])
+
   async function handleLogin(username: string, password: string) {
     if (isLoggingIn) {
       return
@@ -346,7 +646,6 @@ export default function App() {
       } catch {
         // Do not block logout on provider profile storage cleanup.
       }
-      clearSoapFlowTimers()
       setSoapFlowPhase('idle')
       setPatientDemoEncounterId(null)
       setIsLoggedIn(false)
@@ -355,6 +654,14 @@ export default function App() {
       setProviderId(null)
       setProviderProfile(null)
       setPatient(null)
+      setActiveEncounterId(null)
+      setActiveEncounterSummary(null)
+      setActiveEncounterDetail(null)
+      setActiveEncounterReport(null)
+      setHomeEncounters([])
+      setNotesEncounters([])
+      setNotesPage(1)
+      setNotesHasMore(false)
       setCurrentPage('home')
       toast.info('Signed out')
     }
@@ -432,12 +739,14 @@ export default function App() {
           toast.warning('Provider profile is missing clinic context (clinic/division/system).')
           return
         }
-        const parsedResult = await parseDemographicsTextWithLlm(accessToken, text, {
-          clinicId,
-          divisionId,
-          clinicSystem,
-          clinicName: providerProfile?.clinicName ?? null,
-        })
+        const parsedResult = await withAuthRetry((token) =>
+          parseDemographicsTextWithLlm(token, text, {
+            clinicId,
+            divisionId,
+            clinicSystem,
+            clinicName: providerProfile?.clinicName ?? null,
+          }),
+        )
         setPatient(parsedResult.patient)
         const name = patientDisplayName(parsedResult.patient)
         if (parsedResult.isNew) {
@@ -455,7 +764,7 @@ export default function App() {
       const errorMessage = error instanceof Error ? error.message : 'Failed to extract demographics'
       toast.warning(errorMessage)
     }
-  }, [accessToken, providerProfile])
+  }, [accessToken, providerProfile, withAuthRetry])
 
   const handleSyncSoapToEmr = React.useCallback(async (payload: SyncChiefComplaintPayload) => {
     const requestId = `sync-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -500,6 +809,7 @@ export default function App() {
     notes: 'Notes',
     recording: 'Recording',
     soap: 'AI EMR',
+    transcript: 'Transcript',
     settings: 'Settings',
     'patient-demographic': 'Patient demographics',
     provider: 'Provider',
@@ -507,6 +817,9 @@ export default function App() {
 
   const patientDemographicPayload =
     patientDemoEncounterId != null ? getDemographicByEncounterId(patientDemoEncounterId) : null
+  const soapPageKey = `${activeEncounterId ?? 'none'}:${activeEncounterReport?.generatedAt ?? 'none'}`
+  const soapPatient =
+    patient && activeEncounterSummary && patient.id !== activeEncounterSummary.patientId ? null : patient
 
   if (isBootstrappingAuth) {
     return (
@@ -538,6 +851,8 @@ export default function App() {
           onBack={
             currentPage === 'patient-demographic'
               ? closePatientDemographic
+              : currentPage === 'transcript'
+                ? () => setCurrentPage(transcriptReturnPage)
               : currentPage === 'provider'
                 ? closeProviderPage
                 : undefined
@@ -557,14 +872,19 @@ export default function App() {
             onClearSelectedPatient={() => setPatient(null)}
             onOpenMatchPatientPicker={() => openPatientSheet('match')}
             onNavigate={(page) => handleNavChange(page)}
-            onOpenEncounterPatient={(id) => openPatientDemographic('home', id)}
+            encounters={homeEncounters}
+            onOpenEncounter={(encounterId) => void openEncounterInSoap(encounterId)}
           />
         )}
         {currentPage === 'notes' && (
           <NotesPage
             patientId={patient?.id}
-            onOpenEncounter={() => handleNavChange('soap')}
-            onOpenEncounterPatient={(id) => openPatientDemographic('notes', id)}
+            encounters={notesEncounters}
+            page={notesPage}
+            hasMore={notesHasMore}
+            onPrevPage={() => setNotesPage((prev) => Math.max(1, prev - 1))}
+            onNextPage={() => setNotesPage((prev) => prev + 1)}
+            onOpenEncounter={(encounterId) => void openEncounterInSoap(encounterId)}
           />
         )}
         {currentPage === 'recording' && (
@@ -577,12 +897,24 @@ export default function App() {
           />
         )}
         {currentPage === 'soap' && soapFlowPhase === 'generating' && <SoapGeneratingPage />}
-        {currentPage === 'soap' && soapFlowPhase === 'success' && <SoapSuccessPage />}
         {currentPage === 'soap' && soapFlowPhase === 'idle' && (
           <SoapPage
-            patient={patient}
+            key={soapPageKey}
+            patient={soapPatient}
+            encounterReport={activeEncounterReport}
+            encounterSummary={activeEncounterSummary}
             onOpenPatientPicker={() => openPatientSheet('select')}
+            onOpenTranscript={() => {
+              setTranscriptReturnPage('soap')
+              setCurrentPage('transcript')
+            }}
             onSyncToEmr={handleSyncSoapToEmr}
+          />
+        )}
+        {currentPage === 'transcript' && (
+          <TranscriptPage
+            patient={soapPatient}
+            encounter={activeEncounterDetail ?? activeEncounterSummary}
           />
         )}
         {currentPage === 'settings' && (

@@ -33,11 +33,20 @@ import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
+import type { EncounterSummary } from '@/lib/encounter-api'
+import type {
+  EncounterReport,
+  ReportCodeEvidence,
+  ReportCodeSuggestion as ApiReportCodeSuggestion,
+} from '@/lib/report-api'
 
 interface SoapPageProps {
   patient?: Patient | null
+  encounterReport?: EncounterReport | null
+  encounterSummary?: EncounterSummary | null
   /** Opens patient search sheet when no patient is selected. */
   onOpenPatientPicker?: () => void
+  onOpenTranscript?: () => void
   onSyncToEmr?: (payload: {
     chiefComplaintText: string
     presentIllnessText: string
@@ -87,11 +96,6 @@ const SECTIONS: {
       'Prescribed Albuterol inhaler 1-2 puffs q4-6h prn cough/wheeze. Supportive care: hydration and rest. Follow up in 7 days if symptoms do not improve. Patient advised on red flags.',
   },
 ]
-
-interface ReportCodeEvidence {
-  evidenceRoute: string | null
-  excerpt: string | null
-}
 
 interface ReportCodeSuggestion {
   id: string
@@ -214,6 +218,25 @@ function formatSuggestionStatus(status: string): string {
 
 function suggestionTitle(suggestion: ReportCodeSuggestion): string {
   return suggestion.condition?.trim() || suggestion.description?.trim() || suggestion.code
+}
+
+function toViewSuggestion(
+  suggestion: ApiReportCodeSuggestion,
+  codeType: 'ICD' | 'CPT',
+  id: string,
+): ReportCodeSuggestion {
+  return {
+    id,
+    code: suggestion.code,
+    codeType,
+    rank: suggestion.rank,
+    condition: suggestion.condition,
+    description: suggestion.description,
+    confidence: suggestion.confidence,
+    rationale: suggestion.rationale,
+    status: suggestion.status,
+    evidence: suggestion.evidence,
+  }
 }
 
 const fabCopyExport = [
@@ -425,22 +448,30 @@ function SoapFabMenu({
   onCopy,
   onSync,
   onEdit,
+  onTranscript,
 }: {
   onCopy: () => void
   onSync: () => void
   onEdit: () => void
+  onTranscript?: () => void
 }) {
   const [open, setOpen] = React.useState(false)
 
   const fabActions = React.useMemo(
-    () => [...fabCopyExport, { icon: Pencil, label: 'Edit', action: 'edit' as const }],
+    () =>
+      [
+        ...fabCopyExport,
+        { icon: FileText, label: 'Transcript', action: 'transcript' as const },
+        { icon: Pencil, label: 'Edit', action: 'edit' as const },
+      ] as const,
     [],
   )
 
-  function handleAction(action: 'copy' | 'sync' | 'edit') {
+  function handleAction(action: 'copy' | 'sync' | 'edit' | 'transcript') {
     setOpen(false)
     if (action === 'copy') onCopy()
     else if (action === 'sync') onSync()
+    else if (action === 'transcript') onTranscript?.()
     else onEdit()
   }
 
@@ -582,16 +613,77 @@ function SyncTransferOverlay({ open }: { open: boolean }) {
   )
 }
 
-export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPageProps) {
+function initialBodiesFromReport(
+  encounterReport?: EncounterReport | null,
+  useDemoFallback = true,
+): Record<SectionId, string> {
+  const soapNote = encounterReport?.emr?.soapNote
+  if (!soapNote) {
+    if (useDemoFallback) {
+      return Object.fromEntries(SECTIONS.map((s) => [s.id, s.defaultBody])) as Record<SectionId, string>
+    }
+    return {
+      subjective: '',
+      objective: '',
+      assessment: '',
+      plan: '',
+    }
+  }
+
+  return {
+    subjective: soapNote.subjective,
+    objective: soapNote.objective,
+    assessment: soapNote.assessment,
+    plan: soapNote.plan,
+  }
+}
+
+export function SoapPage({
+  patient,
+  encounterReport,
+  encounterSummary,
+  onOpenPatientPicker,
+  onOpenTranscript,
+  onSyncToEmr,
+}: SoapPageProps) {
+  const hasEncounterContext = Boolean(encounterSummary || encounterReport)
   const [expanded, setExpanded] = React.useState<Record<SectionId, boolean>>(() =>
     Object.fromEntries(SECTIONS.map((s) => [s.id, true])) as Record<SectionId, boolean>,
   )
   const [bodies, setBodies] = React.useState<Record<SectionId, string>>(() =>
-    Object.fromEntries(SECTIONS.map((s) => [s.id, s.defaultBody])) as Record<SectionId, string>,
+    initialBodiesFromReport(encounterReport, !hasEncounterContext),
   )
   const [isEditing, setIsEditing] = React.useState(false)
   const [codeDetail, setCodeDetail] = React.useState<ClinicalCodeDetail | null>(null)
   const [isSyncAnimating, setIsSyncAnimating] = React.useState(false)
+
+  React.useEffect(() => {
+    setBodies(initialBodiesFromReport(encounterReport, !hasEncounterContext))
+  }, [encounterReport, hasEncounterContext])
+
+  const icdSuggestions = React.useMemo(
+    () =>
+      encounterReport?.icdSuggestions?.length
+        ? encounterReport.icdSuggestions.map((row, index) =>
+            toViewSuggestion(row, 'ICD', `icd-${row.code}-${row.rank}-${index}`),
+          )
+        : hasEncounterContext
+          ? []
+          : ICD_SUGGESTIONS,
+    [encounterReport, hasEncounterContext],
+  )
+
+  const cptSuggestions = React.useMemo(
+    () =>
+      encounterReport?.cptSuggestions?.length
+        ? encounterReport.cptSuggestions.map((row, index) =>
+            toViewSuggestion(row, 'CPT', `cpt-${row.code}-${row.rank}-${index}`),
+          )
+        : hasEncounterContext
+          ? []
+          : CPT_SUGGESTIONS,
+    [encounterReport, hasEncounterContext],
+  )
 
   const allExpanded = SECTIONS.every((s) => expanded[s.id])
 
@@ -612,8 +704,8 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
   }
 
   function buildChiefComplaintSyncPayload() {
-    const icdCodeList = ICD_SUGGESTIONS.map((row) => row.code).join(', ')
-    const cptCodeList = CPT_SUGGESTIONS.map((row) => row.code).join(', ')
+    const icdCodeList = icdSuggestions.map((row) => row.code).join(', ')
+    const cptCodeList = cptSuggestions.map((row) => row.code).join(', ')
 
     const presentIllnessText = [
       `Objective:\n${bodies.objective}`,
@@ -672,12 +764,20 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
       <div className="flex min-w-0 items-center gap-3">
         <Avatar className="size-12 shrink-0 border-2 border-background">
           <AvatarFallback className="bg-primary/30 text-sm font-bold text-primary">
-            {patient ? initialsFromName(patientDisplayName(patient)) : '—'}
+            {patient
+              ? initialsFromName(patientDisplayName(patient))
+              : encounterSummary?.patientId
+                ? encounterSummary.patientId.slice(0, 2).toUpperCase()
+                : '—'}
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0">
           <h2 className="truncate font-bold text-foreground">
-            {patient ? patientDisplayName(patient) : 'Select a patient'}
+            {patient
+              ? patientDisplayName(patient)
+              : encounterSummary?.patientId
+                ? `Encounter patient ${encounterSummary.patientId.slice(0, 8)}`
+                : 'Select a patient'}
           </h2>
           <p className="text-xs text-muted-foreground">
             {patient
@@ -741,6 +841,15 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
               {allExpanded ? 'Collapse All' : 'Expand All'}
             </button>
           </motion.div>
+          {hasEncounterContext && !encounterReport?.emr && (
+            <motion.div
+              variants={soapPageItemVariants}
+              className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground"
+            >
+              No EMR note exists for this encounter yet. Generate an EMR to populate SOAP and code
+              suggestions.
+            </motion.div>
+          )}
 
           {SECTIONS.map((s) => (
             <motion.div
@@ -806,7 +915,7 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
             <Sparkles className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
             <h3 className="text-base font-bold text-foreground">AI Suggested ICD</h3>
           </motion.div>
-          {ICD_SUGGESTIONS.map((row) => (
+          {icdSuggestions.map((row) => (
             <motion.div key={row.id} variants={soapPageItemVariants}>
               <ClinicalCodeCard
                 borderAccentClass="border-l-violet-500"
@@ -830,7 +939,7 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
             <Code2 className="size-5 shrink-0 text-teal-600 dark:text-teal-400" />
             <h3 className="text-base font-bold text-foreground">AI Suggested CPT</h3>
           </motion.div>
-          {CPT_SUGGESTIONS.map((row) => (
+          {cptSuggestions.map((row) => (
             <motion.div key={row.id} variants={soapPageItemVariants}>
               <ClinicalCodeCard
                 borderAccentClass="border-l-teal-500"
@@ -863,6 +972,7 @@ export function SoapPage({ patient, onOpenPatientPicker, onSyncToEmr }: SoapPage
           onCopy={handleCopy}
           onSync={handleSync}
           onEdit={() => setIsEditing(true)}
+          onTranscript={onOpenTranscript}
         />
       ) : null}
 
