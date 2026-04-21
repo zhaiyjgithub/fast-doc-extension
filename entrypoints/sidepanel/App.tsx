@@ -30,7 +30,7 @@ import {
   listEncounters,
   type EncounterSummary,
 } from '@/lib/encounter-api'
-import { EmrApiError, generateEmr } from '@/lib/emr-api'
+import { EmrApiError, generateEmr, pollEmrTask, type EmrTaskSubmitted } from '@/lib/emr-api'
 import { ReportApiError, getEncounterReport, type EncounterReport } from '@/lib/report-api'
 import {
   clearPersistedProviderProfile,
@@ -139,6 +139,8 @@ export default function App() {
   const [notesPage, setNotesPage] = React.useState(1)
   const [notesHasMore, setNotesHasMore] = React.useState(false)
   const [transcriptReturnPage, setTranscriptReturnPage] = React.useState<AppPage>('soap')
+  const [isEmrGenerating, setIsEmrGenerating] = React.useState(false)
+  const emrPollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
 
   const expireSessionAndRedirectToLogin = React.useCallback(async () => {
     try {
@@ -381,12 +383,10 @@ export default function App() {
       setActiveEncounterId(encounterId)
       setActiveEncounterSummary(encounter)
 
-      // Phase 2: navigate to SOAP generating, then run EMR generation
-      setCurrentPage('soap')
-      setSoapFlowPhase('generating')
-
+      // Phase 2: submit generation job
+      let submitted: EmrTaskSubmitted
       try {
-        await withAuthRetry((token) =>
+        submitted = await withAuthRetry((token) =>
           generateEmr(token, {
             encounterId,
             patientId: patient.id,
@@ -395,24 +395,58 @@ export default function App() {
             conversationDurationSeconds,
           }),
         )
-
-        const [detail, report] = await Promise.all([
-          withAuthRetry((token) => getEncounter(token, encounterId)),
-          withAuthRetry((token) => getEncounterReport(token, encounterId)),
-        ])
-        setActiveEncounterDetail(detail)
-        setActiveEncounterSummary(detail)
-        setActiveEncounterReport(report)
-        await refreshTodayEncounters(false)
-        toast.success('SOAP note ready')
       } catch (error) {
-        // EMR generation failed after navigating — go back to recording page
-        const message = error instanceof Error ? error.message : 'Failed to generate EMR. Please try again.'
+        const message = error instanceof Error ? error.message : 'Failed to submit EMR generation. Please try again.'
         toast.warning(message)
-        setCurrentPage('recording')
-      } finally {
-        setSoapFlowPhase('idle')
+        return
       }
+
+      // Navigate to soap page immediately with loading state
+      setIsEmrGenerating(true)
+      setCurrentPage('soap')
+
+      // Clear any existing poll interval
+      if (emrPollIntervalRef.current) clearInterval(emrPollIntervalRef.current)
+
+      // Capture values for the polling closure
+      const pollEncounterId = encounterId
+      const pollTaskId = submitted.taskId
+
+      // Start polling every 10 seconds
+      emrPollIntervalRef.current = setInterval(() => {
+        void (async () => {
+          try {
+            const poll = await pollEmrTask(accessToken!, pollTaskId)
+            if (poll.status === 'finished') {
+              clearInterval(emrPollIntervalRef.current!)
+              emrPollIntervalRef.current = null
+              const [detail, report] = await Promise.all([
+                withAuthRetry((token) => getEncounter(token, pollEncounterId)),
+                withAuthRetry((token) => getEncounterReport(token, pollEncounterId)),
+              ])
+              setActiveEncounterDetail(detail)
+              setActiveEncounterSummary(detail)
+              setActiveEncounterReport(report)
+              await refreshTodayEncounters(false)
+              setIsEmrGenerating(false)
+              toast.success('SOAP note ready')
+            } else if (poll.status === 'failed') {
+              clearInterval(emrPollIntervalRef.current!)
+              emrPollIntervalRef.current = null
+              setIsEmrGenerating(false)
+              setCurrentPage('recording')
+              toast.warning(poll.error)
+            }
+            // else pending/running — continue polling
+          } catch (err) {
+            clearInterval(emrPollIntervalRef.current!)
+            emrPollIntervalRef.current = null
+            setIsEmrGenerating(false)
+            const message = err instanceof Error ? err.message : String(err)
+            toast.warning(message)
+          }
+        })()
+      }, 10_000)
     },
     [
       accessToken,
@@ -455,6 +489,14 @@ export default function App() {
   React.useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
   }, [isDark])
+
+  React.useEffect(() => {
+    return () => {
+      if (emrPollIntervalRef.current) {
+        clearInterval(emrPollIntervalRef.current)
+      }
+    }
+  }, [])
 
   React.useEffect(() => {
     let cancelled = false
@@ -903,6 +945,7 @@ export default function App() {
             patient={soapPatient}
             encounterReport={activeEncounterReport}
             encounterSummary={activeEncounterSummary}
+            isGenerating={isEmrGenerating}
             onOpenPatientPicker={() => openPatientSheet('select')}
             onOpenTranscript={() => {
               setTranscriptReturnPage('soap')
@@ -955,6 +998,7 @@ export default function App() {
           if (!open) setPatientSheetIntent('select')
         }}
         onSelect={handleSelectPatient}
+        accessToken={accessToken}
       />
     </AppShell>
   )

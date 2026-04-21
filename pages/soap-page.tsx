@@ -44,6 +44,7 @@ interface SoapPageProps {
   patient?: Patient | null
   encounterReport?: EncounterReport | null
   encounterSummary?: EncounterSummary | null
+  isGenerating?: boolean
   /** Opens patient search sheet when no patient is selected. */
   onOpenPatientPicker?: () => void
   onOpenTranscript?: () => void
@@ -642,6 +643,7 @@ export function SoapPage({
   patient,
   encounterReport,
   encounterSummary,
+  isGenerating,
   onOpenPatientPicker,
   onOpenTranscript,
   onSyncToEmr,
@@ -828,133 +830,145 @@ export function SoapPage({
             )}
           </motion.section>
 
-          <motion.div
-            variants={soapPageItemVariants}
-            className="mb-2 flex items-center justify-between px-0.5"
-          >
-            <h3 className="text-base font-bold text-foreground">SOAP Note</h3>
-            <button
-              type="button"
-              onClick={toggleExpandAll}
-              className="text-xs font-semibold text-primary underline-offset-2 hover:underline"
-            >
-              {allExpanded ? 'Collapse All' : 'Expand All'}
-            </button>
-          </motion.div>
-          {hasEncounterContext && !encounterReport?.emr && (
+          {isGenerating ? (
             <motion.div
               variants={soapPageItemVariants}
-              className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground"
+              className="flex flex-col items-center justify-center gap-3 py-20"
             >
-              No EMR note exists for this encounter yet. Generate an EMR to populate SOAP and code
-              suggestions.
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+              <p className="text-sm text-muted-foreground">Generating EMR note…</p>
             </motion.div>
-          )}
-
-          {SECTIONS.map((s) => (
-            <motion.div
-              key={s.id}
-              variants={soapPageItemVariants}
-              className={cn(
-                'rounded-2xl border border-border/60 border-l-4 bg-card p-4 shadow-sm',
-                s.borderClass,
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => setExpanded((e) => ({ ...e, [s.id]: !e[s.id] }))}
-                className="mb-2 flex w-full items-center justify-between gap-2 text-left"
+          ) : (
+            <>
+              <motion.div
+                variants={soapPageItemVariants}
+                className="mb-2 flex items-center justify-between px-0.5"
               >
-                <span
+                <h3 className="text-base font-bold text-foreground">SOAP Note</h3>
+                <button
+                  type="button"
+                  onClick={toggleExpandAll}
+                  className="text-xs font-semibold text-primary underline-offset-2 hover:underline"
+                >
+                  {allExpanded ? 'Collapse All' : 'Expand All'}
+                </button>
+              </motion.div>
+              {hasEncounterContext && !encounterReport?.emr && (
+                <motion.div
+                  variants={soapPageItemVariants}
+                  className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground"
+                >
+                  No EMR note exists for this encounter yet. Generate an EMR to populate SOAP and code
+                  suggestions.
+                </motion.div>
+              )}
+
+              {SECTIONS.map((s) => (
+                <motion.div
+                  key={s.id}
+                  variants={soapPageItemVariants}
                   className={cn(
-                    'text-[10px] font-bold uppercase tracking-widest',
-                    s.labelClass,
+                    'rounded-2xl border border-border/60 border-l-4 bg-card p-4 shadow-sm',
+                    s.borderClass,
                   )}
                 >
-                  {s.label}
-                </span>
-                {expanded[s.id] ? (
-                  <ChevronUp className="size-4 shrink-0 text-muted-foreground/50" />
-                ) : (
-                  <ChevronDown className="size-4 shrink-0 text-muted-foreground/50" />
-                )}
-              </button>
-              <AnimatePresence initial={false}>
-                {expanded[s.id] ? (
-                  <motion.div
-                    key={`${s.id}-body`}
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.2, ease: 'easeOut' }}
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((e) => ({ ...e, [s.id]: !e[s.id] }))}
+                    className="mb-2 flex w-full items-center justify-between gap-2 text-left"
                   >
-                    {isEditing ? (
-                      <Textarea
-                        value={bodies[s.id]}
-                        onChange={(e) =>
-                          setBodies((b) => ({ ...b, [s.id]: e.target.value }))
-                        }
-                        className="min-h-[120px] resize-none text-sm leading-relaxed"
-                        aria-label={s.label}
-                      />
+                    <span
+                      className={cn(
+                        'text-[10px] font-bold uppercase tracking-widest',
+                        s.labelClass,
+                      )}
+                    >
+                      {s.label}
+                    </span>
+                    {expanded[s.id] ? (
+                      <ChevronUp className="size-4 shrink-0 text-muted-foreground/50" />
                     ) : (
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                        {bodies[s.id]}
-                      </p>
+                      <ChevronDown className="size-4 shrink-0 text-muted-foreground/50" />
                     )}
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-            </motion.div>
-          ))}
+                  </button>
+                  <AnimatePresence initial={false}>
+                    {expanded[s.id] ? (
+                      <motion.div
+                        key={`${s.id}-body`}
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                      >
+                        {isEditing ? (
+                          <Textarea
+                            value={bodies[s.id]}
+                            onChange={(e) =>
+                              setBodies((b) => ({ ...b, [s.id]: e.target.value }))
+                            }
+                            className="min-h-[120px] resize-none text-sm leading-relaxed"
+                            aria-label={s.label}
+                          />
+                        ) : (
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                            {bodies[s.id]}
+                          </p>
+                        )}
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
+                </motion.div>
+              ))}
 
-          <motion.div
-            variants={soapPageItemVariants}
-            className="mb-2 flex items-center gap-2 px-0.5"
-          >
-            <Sparkles className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
-            <h3 className="text-base font-bold text-foreground">AI Suggested ICD</h3>
-          </motion.div>
-          {icdSuggestions.map((row) => (
-            <motion.div key={row.id} variants={soapPageItemVariants}>
-              <ClinicalCodeCard
-                borderAccentClass="border-l-violet-500"
-                title={suggestionTitle(row)}
-                status={row.status}
-                code={row.code}
-                codeFieldLabel="ICD code"
-                description={row.description?.trim() || '-'}
-                descriptionFieldLabel="ICD description"
-                rationale={row.rationale?.trim() || '-'}
-                confidence={row.confidence}
-                onOpenDetail={() => setCodeDetail({ row })}
-              />
-            </motion.div>
-          ))}
+              <motion.div
+                variants={soapPageItemVariants}
+                className="mb-2 flex items-center gap-2 px-0.5"
+              >
+                <Sparkles className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <h3 className="text-base font-bold text-foreground">AI Suggested ICD</h3>
+              </motion.div>
+              {icdSuggestions.map((row) => (
+                <motion.div key={row.id} variants={soapPageItemVariants}>
+                  <ClinicalCodeCard
+                    borderAccentClass="border-l-violet-500"
+                    title={suggestionTitle(row)}
+                    status={row.status}
+                    code={row.code}
+                    codeFieldLabel="ICD code"
+                    description={row.description?.trim() || '-'}
+                    descriptionFieldLabel="ICD description"
+                    rationale={row.rationale?.trim() || '-'}
+                    confidence={row.confidence}
+                    onOpenDetail={() => setCodeDetail({ row })}
+                  />
+                </motion.div>
+              ))}
 
-          <motion.div
-            variants={soapPageItemVariants}
-            className="mb-2 flex items-center gap-2 px-0.5"
-          >
-            <Code2 className="size-5 shrink-0 text-teal-600 dark:text-teal-400" />
-            <h3 className="text-base font-bold text-foreground">AI Suggested CPT</h3>
-          </motion.div>
-          {cptSuggestions.map((row) => (
-            <motion.div key={row.id} variants={soapPageItemVariants}>
-              <ClinicalCodeCard
-                borderAccentClass="border-l-teal-500"
-                title={suggestionTitle(row)}
-                status={row.status}
-                code={row.code}
-                codeFieldLabel="CPT code"
-                description={row.description?.trim() || '-'}
-                descriptionFieldLabel="CPT description"
-                rationale={row.rationale?.trim() || '-'}
-                confidence={row.confidence}
-                onOpenDetail={() => setCodeDetail({ row })}
-              />
-            </motion.div>
-          ))}
+              <motion.div
+                variants={soapPageItemVariants}
+                className="mb-2 flex items-center gap-2 px-0.5"
+              >
+                <Code2 className="size-5 shrink-0 text-teal-600 dark:text-teal-400" />
+                <h3 className="text-base font-bold text-foreground">AI Suggested CPT</h3>
+              </motion.div>
+              {cptSuggestions.map((row) => (
+                <motion.div key={row.id} variants={soapPageItemVariants}>
+                  <ClinicalCodeCard
+                    borderAccentClass="border-l-teal-500"
+                    title={suggestionTitle(row)}
+                    status={row.status}
+                    code={row.code}
+                    codeFieldLabel="CPT code"
+                    description={row.description?.trim() || '-'}
+                    descriptionFieldLabel="CPT description"
+                    rationale={row.rationale?.trim() || '-'}
+                    confidence={row.confidence}
+                    onOpenDetail={() => setCodeDetail({ row })}
+                  />
+                </motion.div>
+              ))}
+            </>
+          )}
         </motion.div>
       </ScrollArea>
 

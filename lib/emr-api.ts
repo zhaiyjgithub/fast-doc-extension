@@ -41,6 +41,16 @@ export class EmrApiError extends Error {
   }
 }
 
+export type EmrTaskSubmitted = {
+  taskId: string
+  status: 'pending'
+}
+
+export type EmrTaskStatus =
+  | { taskId: string; status: 'pending' | 'running' }
+  | { taskId: string; status: 'finished'; result: GenerateEmrResult }
+  | { taskId: string; status: 'failed'; error: string }
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -238,35 +248,21 @@ async function requestEmrEndpoint(
 export async function generateEmr(
   accessToken: string,
   payload: GenerateEmrPayload,
-): Promise<GenerateEmrResult> {
+): Promise<EmrTaskSubmitted> {
   const encounterId = payload.encounterId?.trim()
   const patientId = payload.patientId?.trim()
   const transcript = payload.transcript?.trim()
 
-  if (!encounterId) {
-    throw new Error('Encounter ID is required for EMR generation.')
-  }
-  if (!patientId) {
-    throw new Error('Patient ID is required for EMR generation.')
-  }
-  if (!transcript) {
-    throw new Error('Transcript is required for EMR generation.')
-  }
-  if (
-    payload.conversationDurationSeconds != null &&
-    (!Number.isInteger(payload.conversationDurationSeconds) || payload.conversationDurationSeconds < 0)
-  ) {
-    throw new Error('conversationDurationSeconds must be a non-negative integer.')
-  }
+  if (!encounterId) throw new Error('Encounter ID is required for EMR generation.')
+  if (!patientId) throw new Error('Patient ID is required for EMR generation.')
+  if (!transcript) throw new Error('Transcript is required for EMR generation.')
 
   const body = await requestEmrEndpoint(
     accessToken,
     '/emr/generate',
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         encounter_id: encounterId,
         patient_id: patientId,
@@ -276,8 +272,36 @@ export async function generateEmr(
         conversation_duration_seconds: payload.conversationDurationSeconds ?? undefined,
       }),
     },
-    'Failed to generate EMR.',
+    'Failed to submit EMR generation.',
   )
 
-  return parseGenerateEmrResult(body)
+  if (!isPlainObject(body)) throw new EmrApiError('Invalid task submission response.')
+  const taskId = asNonEmptyString(body.task_id)
+  if (!taskId) throw new EmrApiError('Missing task_id in response.')
+  return { taskId, status: 'pending' }
+}
+
+export async function pollEmrTask(
+  accessToken: string,
+  taskId: string,
+): Promise<EmrTaskStatus> {
+  const body = await requestEmrEndpoint(
+    accessToken,
+    `/emr/task/${taskId}`,
+    { method: 'GET' },
+    'Failed to poll EMR task status.',
+  )
+
+  if (!isPlainObject(body)) throw new EmrApiError('Invalid task poll response.')
+  const taskStatus = asNonEmptyString(body.status)
+  if (!taskStatus) throw new EmrApiError('Missing status in task poll response.')
+
+  if (taskStatus === 'finished') {
+    const resultRaw = isPlainObject(body.result) ? body.result : body
+    return { taskId, status: 'finished', result: parseGenerateEmrResult(resultRaw) }
+  }
+  if (taskStatus === 'failed') {
+    return { taskId, status: 'failed', error: asNonEmptyString(body.error) ?? 'Unknown error' }
+  }
+  return { taskId, status: taskStatus as 'pending' | 'running' }
 }
