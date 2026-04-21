@@ -303,5 +303,8 @@ export async function pollEmrTask(
   if (taskStatus === 'failed') {
     return { taskId, status: 'failed', error: asNonEmptyString(body.error) ?? 'Unknown error' }
   }
-  return { taskId, status: taskStatus as 'pending' | 'running' }
+  if (taskStatus !== 'pending' && taskStatus !== 'running') {
+    throw new EmrApiError(`Unexpected task status: ${taskStatus}`)
+  }
+  return { taskId, status: taskStatus }
 }

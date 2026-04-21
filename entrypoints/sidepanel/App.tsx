@@ -411,30 +411,50 @@ export default function App() {
       const pollEncounterId = encounterId
       const pollTaskId = submitted.taskId
 
+      // Shared handler for a resolved poll (finished or failed)
+      const handlePollResolved = async (poll: Awaited<ReturnType<typeof pollEmrTask>>) => {
+        if (poll.status === 'finished') {
+          clearInterval(emrPollIntervalRef.current!)
+          emrPollIntervalRef.current = null
+          const [detail, report] = await Promise.all([
+            withAuthRetry((token) => getEncounter(token, pollEncounterId)),
+            withAuthRetry((token) => getEncounterReport(token, pollEncounterId)),
+          ])
+          setActiveEncounterDetail(detail)
+          setActiveEncounterSummary(detail)
+          setActiveEncounterReport(report)
+          await refreshTodayEncounters(false)
+          setIsEmrGenerating(false)
+          toast.success('SOAP note ready')
+        } else if (poll.status === 'failed') {
+          clearInterval(emrPollIntervalRef.current!)
+          emrPollIntervalRef.current = null
+          setIsEmrGenerating(false)
+          if (currentPage === 'soap') {
+            setCurrentPage('recording')
+          }
+          toast.warning(poll.error)
+        }
+      }
+
+      let pollAttempts = 0
+      const MAX_POLLS = 36  // 6 minutes at 10s interval
+
       // Start polling every 10 seconds
       emrPollIntervalRef.current = setInterval(() => {
         void (async () => {
+          pollAttempts++
+          if (pollAttempts > MAX_POLLS) {
+            clearInterval(emrPollIntervalRef.current!)
+            emrPollIntervalRef.current = null
+            setIsEmrGenerating(false)
+            toast.warning('EMR generation timed out. Please try again.')
+            return
+          }
           try {
             const poll = await withAuthRetry((token) => pollEmrTask(token, pollTaskId))
-            if (poll.status === 'finished') {
-              clearInterval(emrPollIntervalRef.current!)
-              emrPollIntervalRef.current = null
-              const [detail, report] = await Promise.all([
-                withAuthRetry((token) => getEncounter(token, pollEncounterId)),
-                withAuthRetry((token) => getEncounterReport(token, pollEncounterId)),
-              ])
-              setActiveEncounterDetail(detail)
-              setActiveEncounterSummary(detail)
-              setActiveEncounterReport(report)
-              await refreshTodayEncounters(false)
-              setIsEmrGenerating(false)
-              toast.success('SOAP note ready')
-            } else if (poll.status === 'failed') {
-              clearInterval(emrPollIntervalRef.current!)
-              emrPollIntervalRef.current = null
-              setIsEmrGenerating(false)
-              setCurrentPage('recording')
-              toast.warning(poll.error)
+            if (poll.status === 'finished' || poll.status === 'failed') {
+              await handlePollResolved(poll)
             }
             // else pending/running — continue polling
           } catch (err) {
@@ -446,6 +466,17 @@ export default function App() {
           }
         })()
       }, 10_000)
+
+      // Trigger one quick check after 2s before the 10s interval fires
+      setTimeout(async () => {
+        if (emrPollIntervalRef.current === null) return  // already resolved
+        try {
+          const poll = await withAuthRetry((token) => pollEmrTask(token, pollTaskId))
+          if (poll.status === 'finished' || poll.status === 'failed') {
+            await handlePollResolved(poll)
+          }
+        } catch { /* ignore — interval will retry */ }
+      }, 2_000)
     },
     [
       accessToken,
