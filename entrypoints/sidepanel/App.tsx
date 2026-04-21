@@ -9,7 +9,6 @@ import { HomePage } from '@/pages/home-page'
 import { NotesPage } from '@/pages/notes-page'
 import { RecordingPage } from '@/pages/recording-page'
 import { SoapPage } from '@/pages/soap-page'
-import { SoapGeneratingPage } from '@/pages/soap-generating-page'
 import { TranscriptPage } from '@/pages/transcript-page'
 import { PatientDemographicPage } from '@/pages/patient-demographic-page'
 import { ProviderPage } from '@/pages/provider-page'
@@ -52,7 +51,7 @@ type AppPage =
   | 'settings'
   | 'patient-demographic'
   | 'provider'
-type SoapFlowPhase = 'idle' | 'generating'
+type SoapFlowPhase = 'idle'
 type ExtractEmrDemographicsResponse = {
   ok?: boolean
   data?: {
@@ -416,7 +415,7 @@ export default function App() {
       emrPollIntervalRef.current = setInterval(() => {
         void (async () => {
           try {
-            const poll = await pollEmrTask(accessToken!, pollTaskId)
+            const poll = await withAuthRetry((token) => pollEmrTask(token, pollTaskId))
             if (poll.status === 'finished') {
               clearInterval(emrPollIntervalRef.current!)
               emrPollIntervalRef.current = null
@@ -885,11 +884,7 @@ export default function App() {
     <AppShell>
       {currentPage !== 'home' && (
         <TopBar
-          title={
-            currentPage === 'soap' && soapFlowPhase === 'generating'
-              ? 'Generating…'
-              : PAGE_TITLES[currentPage]
-          }
+          title={PAGE_TITLES[currentPage]}
           onBack={
             currentPage === 'patient-demographic'
               ? closePatientDemographic
@@ -938,8 +933,7 @@ export default function App() {
             onDismissActivePatient={handleDismissActiveRecordingPatient}
           />
         )}
-        {currentPage === 'soap' && soapFlowPhase === 'generating' && <SoapGeneratingPage />}
-        {currentPage === 'soap' && soapFlowPhase === 'idle' && (
+        {currentPage === 'soap' && (
           <SoapPage
             key={soapPageKey}
             patient={soapPatient}
