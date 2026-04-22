@@ -21,17 +21,60 @@ interface PatientBannerProps {
   dob?: string
   gender?: string
   onDismiss?: () => void
+  onClick?: () => void
   className?: string
 }
 
-export function PatientBanner({ name, dob, gender, onDismiss, className }: PatientBannerProps) {
-  const metaLine = [dob ? `DOB: ${dob}` : null, gender ?? null].filter(Boolean).join(' · ')
+function formatDobDisplay(value: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return new Intl.DateTimeFormat('en-US', {
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+  }).format(parsed)
+}
+
+function ageFromDob(value: string): string | null {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  const now = new Date()
+  let age = now.getFullYear() - parsed.getFullYear()
+  const monthDelta = now.getMonth() - parsed.getMonth()
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < parsed.getDate())) {
+    age -= 1
+  }
+  if (!Number.isFinite(age) || age < 0) return null
+  return `${age}y`
+}
+
+export function PatientBanner({ name, dob, gender, onDismiss, onClick, className }: PatientBannerProps) {
+  const formattedDob = dob ? formatDobDisplay(dob) : null
+  const age = dob ? ageFromDob(dob) : null
+  const metaLine = [formattedDob ? `DOB: ${formattedDob}` : null, age, gender ?? null]
+    .filter(Boolean)
+    .join(' · ')
   const initials = initialsFromDisplayName(name)
 
   return (
     <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onClick()
+              }
+            }
+          : undefined
+      }
       className={cn(
         'flex w-full shrink-0 items-center gap-4 border-b border-border bg-primary/10 px-4 py-2.5',
+        onClick &&
+          'cursor-pointer transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         className,
       )}
     >
@@ -46,7 +89,10 @@ export function PatientBanner({ name, dob, gender, onDismiss, className }: Patie
       </div>
       {onDismiss && (
         <button
-          onClick={onDismiss}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDismiss()
+          }}
           className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
           aria-label="Remove selected patient"
         >

@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Search, ChevronRight, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { searchPatients } from '@/lib/patient-api'
 
 export interface Patient {
   id: string
@@ -42,55 +43,8 @@ interface PatientSearchSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSelect: (patient: Patient) => void
+  accessToken?: string | null
 }
-
-const MOCK_PATIENTS: Patient[] = [
-  {
-    id: '1',
-    mrn: 'MRN-100842',
-    firstName: 'James',
-    lastName: 'Wilson',
-    dateOfBirth: '1985-03-12',
-    gender: 'Male',
-    isActive: true,
-  },
-  {
-    id: '2',
-    mrn: 'MRN-100903',
-    firstName: 'Sarah',
-    lastName: 'Chen',
-    dateOfBirth: '1992-07-25',
-    gender: 'Female',
-    isActive: true,
-  },
-  {
-    id: '3',
-    mrn: 'MRN-100721',
-    firstName: 'Emily',
-    lastName: 'Rodriguez',
-    dateOfBirth: '1978-11-03',
-    gender: 'Female',
-    isActive: true,
-  },
-  {
-    id: '4',
-    mrn: 'MRN-101012',
-    firstName: 'Michael',
-    lastName: 'Torres',
-    dateOfBirth: '2001-01-18',
-    gender: 'Male',
-    isActive: true,
-  },
-  {
-    id: '5',
-    mrn: 'MRN-100655',
-    firstName: 'Lisa',
-    lastName: 'Park',
-    dateOfBirth: '1965-09-30',
-    gender: 'Female',
-    isActive: true,
-  },
-]
 
 const AVATAR_STYLES = [
   'bg-primary text-primary-foreground',
@@ -117,27 +71,120 @@ function displayName(patient: Patient): string {
   return `${patient.firstName} ${patient.lastName}`.trim()
 }
 
+const SEARCH_DEBOUNCE_MS = 350
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const MM_DD_YYYY_RE = /^(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/(\d{4})$/
+const YYYY_MM_DD_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
+
+function normalizeDobForApi(raw: string): string | null {
+  const v = raw.trim()
+  const slashMatch = MM_DD_YYYY_RE.exec(v)
+  if (slashMatch) {
+    const month = slashMatch[1].padStart(2, '0')
+    const day = slashMatch[2].padStart(2, '0')
+    const year = slashMatch[3]
+    return `${year}-${month}-${day}`
+  }
+  if (YYYY_MM_DD_RE.test(v)) {
+    return v
+  }
+  return null
+}
+
+function buildSearchOptionsFromQuery(raw: string): {
+  q?: string
+  dob?: string
+  patientId?: string
+  clinicPatientId?: string
+} {
+  const query = raw.trim()
+  if (!query) {
+    return {}
+  }
+
+  const prefixed = query.match(/^(clinic\s*patient\s*id|patient\s*id|cpid)\s*:\s*(.+)$/i)
+  if (prefixed && prefixed[2]?.trim()) {
+    return { clinicPatientId: prefixed[2].trim() }
+  }
+
+  if (UUID_RE.test(query)) {
+    return { patientId: query }
+  }
+
+  const normalizedDob = normalizeDobForApi(query)
+  if (normalizedDob) {
+    return { dob: normalizedDob }
+  }
+
+  // For compact identifiers containing digits and no spaces, prefer clinic patient ID search.
+  if (!query.includes(' ') && /\d/.test(query)) {
+    return { clinicPatientId: query }
+  }
+
+  return { q: query }
+}
+
 export function PatientSearchSheet({
   open,
   onOpenChange,
   onSelect,
+  accessToken,
 }: PatientSearchSheetProps) {
   const [query, setQuery] = React.useState('')
-  const [isLoading] = React.useState(false)
+  const [patients, setPatients] = React.useState<Patient[]>([])
+  const [isLoading, setIsLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const abortRef = React.useRef<AbortController | null>(null)
 
-  const q = query.trim().toLowerCase()
-  const filtered = MOCK_PATIENTS.filter((p) => {
-    if (!q) return true
-    const name = displayName(p).toLowerCase()
-    const dobFmt = formatDobDisplay(p.dateOfBirth).toLowerCase()
-    return (
-      name.includes(q) ||
-      (p.mrn ?? '').toLowerCase().includes(q) ||
-      (p.clinicPatientId ?? '').toLowerCase().includes(q) ||
-      p.dateOfBirth.toLowerCase().includes(q) ||
-      dobFmt.includes(q)
-    )
-  })
+  // Reset state when sheet closes
+  React.useEffect(() => {
+    if (!open) {
+      setQuery('')
+      setPatients([])
+      setError(null)
+    }
+  }, [open])
+
+  // Debounced search: fetch whenever query or open state changes
+  React.useEffect(() => {
+    if (!open || !accessToken) return
+
+    const token = accessToken.trim()
+    if (!token) return
+
+    // Cancel any in-flight request
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    const timerId = setTimeout(async () => {
+      setIsLoading(true)
+      setError(null)
+      try {
+        const smartOptions = buildSearchOptionsFromQuery(query)
+        const result = await searchPatients(token, smartOptions)
+        if (!controller.signal.aborted) {
+          setPatients(result.items)
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setError(err instanceof Error ? err.message : 'Failed to load patients.')
+          setPatients([])
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false)
+        }
+      }
+    }, query.trim() ? SEARCH_DEBOUNCE_MS : 0)
+
+    return () => {
+      clearTimeout(timerId)
+      controller.abort()
+    }
+  }, [open, query, accessToken])
+
+  const filtered = patients
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -175,10 +222,11 @@ export function PatientSearchSheet({
               <Search className="size-5" aria-hidden />
             </div>
             <Input
-              placeholder="Search name, MRN, or DOB…"
+              placeholder="Search by name, DOB (MM/DD/YYYY), UUID, or Patient ID (cpid:1234)"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               autoFocus
+              aria-label="Search patients by name, DOB, UUID, or patient ID"
               className={cn(
                 'h-auto rounded-2xl border-0 bg-muted py-4 pl-12 pr-4 text-base shadow-none transition-all',
                 'placeholder:text-muted-foreground/70 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-primary',
@@ -191,17 +239,22 @@ export function PatientSearchSheet({
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-4 px-6 pb-8">
               <p className="px-1 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                Recent searches
+                {query.trim() ? 'Results' : 'All patients'}
               </p>
               {isLoading
                 ? Array.from({ length: 4 }).map((_, i) => (
                     <Skeleton key={i} className="h-[88px] rounded-lg" />
                   ))
-                : filtered.map((patient, index) => {
+                : error
+                  ? (
+                    <p className="py-10 text-center text-sm text-destructive">
+                      {error}
+                    </p>
+                  )
+                  : filtered.map((patient, index) => {
                     const name = displayName(patient)
                     const ini = initialsFromName(name)
                     const style = AVATAR_STYLES[index % AVATAR_STYLES.length]
-                    const mutedAvatar = patient.id === '4'
                     return (
                       <button
                         key={patient.id}
@@ -216,7 +269,6 @@ export function PatientSearchSheet({
                           className={cn(
                             'flex size-14 shrink-0 items-center justify-center rounded-full text-lg font-bold',
                             style,
-                            mutedAvatar && 'opacity-70',
                           )}
                         >
                           {ini}
@@ -225,13 +277,19 @@ export function PatientSearchSheet({
                           <h3 className="font-bold text-foreground transition-colors group-hover:text-primary">
                             {name}
                           </h3>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>{patient.clinicPatientId ?? patient.mrn ?? '—'}</span>
-                            <span
-                              className="size-1 shrink-0 rounded-full bg-border"
-                              aria-hidden
-                            />
-                            <span>DOB: {formatDobDisplay(patient.dateOfBirth)}</span>
+                          <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span>DOB: {formatDobDisplay(patient.dateOfBirth)}</span>
+                              {patient.gender && (
+                                <>
+                                  <span className="size-1 shrink-0 rounded-full bg-border" aria-hidden />
+                                  <span>{patient.gender}</span>
+                                </>
+                              )}
+                            </div>
+                            {(patient.clinicPatientId ?? patient.mrn) && (
+                              <div>Patient ID: {patient.clinicPatientId ?? patient.mrn}</div>
+                            )}
                           </div>
                         </div>
                         <ChevronRight
@@ -241,9 +299,9 @@ export function PatientSearchSheet({
                       </button>
                     )
                   })}
-              {!isLoading && filtered.length === 0 && (
+              {!isLoading && !error && filtered.length === 0 && (
                 <p className="py-10 text-center text-sm text-muted-foreground">
-                  No patients found
+                  {accessToken ? 'No patients found' : 'Sign in to search patients'}
                 </p>
               )}
             </div>

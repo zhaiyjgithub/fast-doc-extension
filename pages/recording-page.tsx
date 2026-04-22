@@ -4,6 +4,7 @@ import { useDeepgramSTT } from '@/hooks/use-deepgram-stt'
 import { getDeepgramTemporaryToken } from '@/lib/deepgram-temporary-token'
 import { deepgramApiKey } from '@/lib/env'
 import { Button } from '@/components/ui/button'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
 import { toast } from 'sonner'
+import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
 
 const DEEPGRAM_API_KEY = deepgramApiKey()
 const DEEPGRAM_CONNECT_TIMEOUT_MS = 15_000
@@ -148,13 +150,19 @@ function liveLinesForElapsed(seconds: number): LiveLine[] {
 
 interface RecordingPageProps {
   patient?: Patient | null
-  onGenerateEMR: (transcript: string, conversationDurationSeconds?: number) => void
+  onGenerateEMR: (
+    transcript: string,
+    conversationDurationSeconds?: number,
+    source?: 'voice' | 'paste',
+  ) => void
   /** Opens patient search sheet (e.g. from empty-state CTA or Search). */
   onOpenPatientPicker?: () => void
   /** Optional callback when tapping “match patient” (e.g. scrape EMR demographics into visit context). */
   onTapMatchPatient?: () => void
   /** Clears the current selected or matched patient for this visit (when idle or paused). */
   onDismissActivePatient?: () => void
+  /** Opens patient details page from the active patient card. */
+  onOpenPatientDetail?: () => void
 }
 
 function formatTime(seconds: number) {
@@ -184,6 +192,18 @@ function genderDisplayLabel(gender: Patient['gender']): string | null {
 
 function patientDisplayName(patient: Patient): string {
   return `${patient.firstName} ${patient.lastName}`.trim()
+}
+
+function initialsFromDisplayName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    const a = parts[0]?.[0]
+    const b = parts[parts.length - 1]?.[0]
+    if (a && b) return (a + b).toUpperCase()
+  }
+  const one = parts[0] ?? name.trim()
+  if (one.length >= 2) return one.slice(0, 2).toUpperCase()
+  return (one[0] ?? '?').toUpperCase()
 }
 
 function AudioWaveform({ compact = false }: { compact?: boolean }) {
@@ -217,52 +237,35 @@ function AudioWaveform({ compact = false }: { compact?: boolean }) {
   )
 }
 
-function RippleButton({
-  children,
-  onClick,
-  disabled,
-  className,
-}: {
-  children: React.ReactNode
-  onClick: () => void
-  disabled?: boolean
-  className?: string
-}) {
-  return (
-    <motion.div className="relative overflow-hidden rounded-lg" whileTap={{ scale: 0.98 }}>
-      <motion.div
-        className="pointer-events-none absolute inset-0 flex items-center justify-center"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: disabled ? 0 : 1 }}
-      >
-        {[0, 1, 2].map((i) => (
-          <motion.div
-            key={i}
-            className="absolute rounded-full border-2 border-primary-foreground/30"
-            style={{ width: '100%', height: '100%' }}
-            animate={{ scale: [1, 1.5, 2], opacity: [0.5, 0.25, 0] }}
-            transition={{ duration: 2, repeat: Infinity, delay: i * 0.6, ease: 'easeOut' }}
-          />
-        ))}
-      </motion.div>
-      <Button className={className} onClick={onClick} disabled={disabled}>
-        {children}
-      </Button>
-    </motion.div>
-  )
-}
-
 export function RecordingPage({
   patient,
   onGenerateEMR,
   onOpenPatientPicker,
   onTapMatchPatient,
   onDismissActivePatient,
+  onOpenPatientDetail,
 }: RecordingPageProps) {
   const [state, setState] = React.useState<RecordingState>('ready')
   const [isConnectingDeepgram, setIsConnectingDeepgram] = React.useState(false)
   const [elapsedTime, setElapsedTime] = React.useState(0)
-  const [transcript, setTranscript] = React.useState('')
+  const [transcript, setTranscript] = React.useState(
+    `Doctor: Good morning. What brings you in today?\n` +
+    `Patient: Hi, doctor. I've been having a really bad cough for about two weeks now. It started with a runny nose and sore throat, but those are mostly gone. Now it's mostly this deep chest cough that won't go away.\n` +
+    `Doctor: I see. Is the cough dry, or are you bringing up any mucus?\n` +
+    `Patient: Mostly dry, but sometimes in the morning there's some yellowish stuff.\n` +
+    `Doctor: Any fever or chills?\n` +
+    `Patient: I had a low-grade fever a few days ago—around 38 degrees—but it's been normal since yesterday.\n` +
+    `Doctor: Any shortness of breath or chest pain when you cough or breathe deeply?\n` +
+    `Patient: A little shortness of breath when I climb stairs, and the coughing fits do make my chest sore.\n` +
+    `Doctor: Okay. Have you been around anyone who was sick recently, or any exposure to chemicals or smoke?\n` +
+    `Patient: My coworker had the flu last week. I don't smoke, but our office has been dusty from some renovation work.\n` +
+    `Doctor: Understood. Any history of asthma, COPD, or recurring chest infections?\n` +
+    `Patient: No, I've always been pretty healthy. No allergies that I know of either.\n` +
+    `Doctor: Alright. Based on your symptoms—the productive cough, low-grade fever, and chest discomfort—I want to listen to your lungs and possibly order a chest X-ray to rule out pneumonia. It could also be acute bronchitis, which is very common after a viral upper respiratory infection.\n` +
+    `Patient: Is it serious? Do I need antibiotics?\n` +
+    `Doctor: If it's bacterial pneumonia, yes. But acute bronchitis is usually viral and resolves on its own. Let's do the exam and imaging first before deciding. In the meantime, I'll recommend rest, plenty of fluids, and a cough suppressant if the cough is disrupting your sleep.\n` +
+    `Patient: Okay, that makes sense. Thank you, doctor.`
+  )
   const [liveLines, setLiveLines] = React.useState<LiveLine[]>([])
   const [showManualInput, setShowManualInput] = React.useState(false)
   const [compactRecordingHeader, setCompactRecordingHeader] = React.useState(false)
@@ -723,8 +726,23 @@ export function RecordingPage({
         >
           {activePatient ? (
             <section
+              role={onOpenPatientDetail ? 'button' : undefined}
+              tabIndex={onOpenPatientDetail ? 0 : undefined}
+              onClick={onOpenPatientDetail}
+              onKeyDown={
+                onOpenPatientDetail
+                  ? (event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        onOpenPatientDetail()
+                      }
+                    }
+                  : undefined
+              }
               className={cn(
                 'relative rounded-lg bg-primary/25 p-4 shadow-sm ring-1 ring-primary/20',
+                onOpenPatientDetail &&
+                  'cursor-pointer transition-colors hover:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 onDismissActivePatient &&
                   state !== 'recording' &&
                   state !== 'processing' &&
@@ -736,7 +754,10 @@ export function RecordingPage({
                 state !== 'processing' && (
                   <button
                     type="button"
-                    onClick={handleRequestDismissPatient}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      handleRequestDismissPatient()
+                    }}
                     className="absolute right-2 top-2 z-10 flex size-8 items-center justify-center rounded-full border border-border/90 bg-card text-muted-foreground shadow-md ring-1 ring-border/30 transition-colors hover:bg-muted hover:text-foreground dark:bg-background dark:hover:bg-muted/80"
                     aria-label="Remove patient from this visit"
                   >
@@ -760,51 +781,36 @@ export function RecordingPage({
                   {patientStatusLabel}
                 </span>
               </div>
-              <h2 className="mt-1 text-lg font-extrabold text-foreground">
-                {patientDisplayName(activePatient)}
-                {age != null ? `, ${age} yrs` : ''}
-              </h2>
-              {(patientDobFormatted || patientGenderLabel) && (
-                <p className="mt-1 text-xs font-medium text-muted-foreground">
-                  {patientDobFormatted ? <>DOB: {patientDobFormatted}</> : null}
-                  {patientDobFormatted && patientGenderLabel ? (
-                    <span aria-hidden> · </span>
-                  ) : null}
-                  {patientGenderLabel ? <>Gender: {patientGenderLabel}</> : null}
-                </p>
-              )}
-              {(activePatient.clinicPatientId || activePatient.mrn) && (
-                <p className="text-xs font-medium text-muted-foreground">
-                  {activePatient.clinicPatientId
-                    ? `Patient ID ${activePatient.clinicPatientId}`
-                    : activePatient.mrn}
-                </p>
-              )}
-              {activePatient.primaryLanguage && (
-                <p className="text-xs font-medium text-muted-foreground">
-                  Language: {activePatient.primaryLanguage}
-                </p>
-              )}
-              {activePatient.demographics ? (
-                <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
-                  {activePatient.demographics.phone ? (
-                    <p>Phone: {activePatient.demographics.phone}</p>
-                  ) : null}
-                  {activePatient.demographics.email ? (
-                    <p>Email: {activePatient.demographics.email}</p>
-                  ) : null}
-                  {activePatient.demographics.addressLine1 ? (
-                    <p>
-                      Address: {activePatient.demographics.addressLine1}
-                      {activePatient.demographics.city ? `, ${activePatient.demographics.city}` : ''}
-                      {activePatient.demographics.state ? `, ${activePatient.demographics.state}` : ''}
-                      {activePatient.demographics.zipCode
-                        ? ` ${activePatient.demographics.zipCode}`
-                        : ''}
+              <div className="mt-2 flex items-start gap-3">
+                <Avatar className="size-12 shrink-0 rounded-full">
+                  <AvatarFallback
+                    className={cn(
+                      'text-xs font-semibold',
+                      avatarFallbackClassForName(patientDisplayName(activePatient)),
+                    )}
+                  >
+                    {initialsFromDisplayName(patientDisplayName(activePatient))}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <h2 className="truncate text-lg font-extrabold text-foreground">
+                    {patientDisplayName(activePatient)}
+                    {age != null ? `, ${age} yrs` : ''}
+                  </h2>
+                  {(patientDobFormatted || patientGenderLabel) && (
+                    <p className="mt-1 text-xs font-medium text-muted-foreground">
+                      {patientDobFormatted ? <>DOB: {patientDobFormatted}</> : null}
+                      {patientDobFormatted && patientGenderLabel ? <span aria-hidden> · </span> : null}
+                      {patientGenderLabel ? <>Gender: {patientGenderLabel}</> : null}
                     </p>
-                  ) : null}
+                  )}
+                  {(activePatient.clinicPatientId || activePatient.mrn) && (
+                    <p className="mt-1 text-xs font-medium text-muted-foreground">
+                      Patient ID: {activePatient.clinicPatientId ?? activePatient.mrn}
+                    </p>
+                  )}
                 </div>
-              ) : null}
+              </div>
             </section>
           ) : onOpenPatientPicker ? (
             <div className="space-y-3">
@@ -925,17 +931,18 @@ export function RecordingPage({
                   >
                     Cancel
                   </Button>
-                  <RippleButton
-                    className="h-10 flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+                  <Button
+                    variant="outline"
+                    className="h-10 flex-1 border-yellow-500 bg-yellow-400 text-foreground hover:bg-yellow-500"
                     onClick={() => {
                       if (!requirePatientOrMatch()) return
-                      onGenerateEMR(transcript, elapsedTime)
+                      onGenerateEMR(transcript, elapsedTime, 'paste')
                     }}
                     disabled={!transcript.trim()}
                   >
                     <Sparkles className="mr-2 size-4" />
                     Generate EMR
-                  </RippleButton>
+                  </Button>
                 </div>
               </motion.div>
             )}
@@ -1159,7 +1166,7 @@ export function RecordingPage({
                     </div>
                     <Button
                       className="h-12 w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                      onClick={() => onGenerateEMR(transcript, elapsedTime)}
+                      onClick={() => onGenerateEMR(transcript, elapsedTime, 'voice')}
                       disabled={!transcript.trim()}
                     >
                       <Sparkles className="mr-2 size-4" />

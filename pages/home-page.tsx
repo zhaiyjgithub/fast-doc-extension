@@ -9,6 +9,8 @@ import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
 import type { EncounterSummary } from '@/lib/encounter-api'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
+import { EncounterStatusBadge } from '@/components/encounter/encounter-status-badge'
+import { EncounterSourceBadge } from '@/components/encounter/encounter-source-badge'
 
 const homePageListVariants: Variants = {
   hidden: {},
@@ -36,10 +38,14 @@ interface HomePageProps {
   providerSpecialty?: string
   /** Site / EHR badge below the navbar (e.g. iClinic). */
   clinicSiteLabel?: string
+  /** Provider clinic name shown after the system id badge. */
+  clinicName?: string
   /** Opens the patient search sheet (e.g. Find patient). */
   onChangePatient: () => void
   /** Clears the toolbar-selected patient without opening the sheet (banner close). */
   onClearSelectedPatient: () => void
+  /** Opens patient details from selected patient banner. */
+  onOpenSelectedPatientDetail?: () => void
   /** Opens patient sheet in match mode (same as Record tab match flow). */
   onOpenMatchPatientPicker?: () => void
   onNavigate: (page: 'recording' | 'soap') => void
@@ -99,17 +105,75 @@ function shortPatientId(patientId: string): string {
   return patientId.slice(0, 8) || patientId
 }
 
+function formatDobDisplay(value: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return new Intl.DateTimeFormat('en-US', {
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+  }).format(parsed)
+}
+
+function ageFromDob(value: string): string | null {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  const now = new Date()
+  let age = now.getFullYear() - parsed.getFullYear()
+  const monthDelta = now.getMonth() - parsed.getMonth()
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < parsed.getDate())) {
+    age -= 1
+  }
+  if (!Number.isFinite(age) || age < 0) return null
+  return `${age}y`
+}
+
+function initialsFromDisplayName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    const a = parts[0]?.[0]
+    const b = parts[parts.length - 1]?.[0]
+    if (a && b) return (a + b).toUpperCase()
+  }
+  const one = parts[0] ?? name.trim()
+  if (one.length >= 2) return one.slice(0, 2).toUpperCase()
+  return (one[0] ?? '?').toUpperCase()
+}
+
+function encounterPatientName(encounter: EncounterSummary): string {
+  const first = encounter.patientFirstName?.trim() ?? ''
+  const last = encounter.patientLastName?.trim() ?? ''
+  const full = `${first} ${last}`.trim()
+  if (full) return full
+  return `Patient ${shortPatientId(encounter.patientId)}`
+}
+
+function encounterPatientMeta(encounter: EncounterSummary): string {
+  const dob = encounter.patientDateOfBirth ? `DOB: ${formatDobDisplay(encounter.patientDateOfBirth)}` : null
+  const age = encounter.patientDateOfBirth ? ageFromDob(encounter.patientDateOfBirth) : null
+  const gender = encounter.patientGender?.trim() || null
+  return [dob, age, gender].filter(Boolean).join(' · ')
+}
+
+function encounterPatientIdLabel(encounter: EncounterSummary): string {
+  const displayId = encounter.patientDisplayId?.trim()
+  if (displayId) return `Patient ID: ${displayId}`
+  return `Patient ID: ${shortPatientId(encounter.patientId)}`
+}
+
 function formatEncounterTime(timestamp: string): string {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) {
     return timestamp
   }
-  return date.toLocaleString([], {
+  return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: '2-digit',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  })
+    hour12: true,
+  }).format(date)
 }
 
 export function HomePage({
@@ -118,8 +182,10 @@ export function HomePage({
   doctorDisplayName: doctorDisplayNameProp,
   providerSpecialty = 'Primary care',
   clinicSiteLabel = 'iClinic',
+  clinicName,
   onChangePatient,
   onClearSelectedPatient,
+  onOpenSelectedPatientDetail,
   onOpenMatchPatientPicker,
   onNavigate,
   encounters,
@@ -164,11 +230,20 @@ export function HomePage({
         <div className="flex flex-wrap items-center gap-2 px-4 py-2">
           <span
             className={cn(
-              'shrink-0 rounded-full border border-border/70 bg-muted/40 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-foreground/90',
+              'shrink-0 rounded-full border border-sky-300/70 bg-sky-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-900 dark:border-sky-800/70 dark:bg-sky-950/45 dark:text-sky-100',
             )}
           >
             {clinicSiteLabel}
           </span>
+          {clinicName?.trim() ? (
+            <span
+              className={cn(
+                'shrink-0 rounded-full border border-violet-300/70 bg-violet-100 px-2.5 py-0.5 text-[10px] font-semibold tracking-wide text-violet-900 dark:border-violet-800/70 dark:bg-violet-950/45 dark:text-violet-100',
+              )}
+            >
+              {clinicName.trim()}
+            </span>
+          ) : null}
           <span
             className={cn(
               'shrink-0 rounded-full bg-primary/30 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-foreground',
@@ -181,6 +256,7 @@ export function HomePage({
 
       {patient && (
         <motion.div
+          className="mb-2"
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
@@ -190,6 +266,7 @@ export function HomePage({
             dob={patient.dateOfBirth}
             gender={patient.gender}
             onDismiss={onClearSelectedPatient}
+            onClick={onOpenSelectedPatientDetail}
           />
         </motion.div>
       )}
@@ -248,7 +325,9 @@ export function HomePage({
             <h2 className="text-lg font-bold text-foreground">Recent encounters</h2>
             <div className="space-y-3">
               {encounters.map((encounter) => {
-                const patientLabel = `Patient ${shortPatientId(encounter.patientId)}`
+                const patientNameLabel = encounterPatientName(encounter)
+                const patientMetaLine = encounterPatientMeta(encounter)
+                const patientIdLine = encounterPatientIdLabel(encounter)
                 return (
                 <div
                   key={encounter.id}
@@ -258,9 +337,9 @@ export function HomePage({
                 >
                   <Avatar className="size-12 shrink-0 rounded-full">
                     <AvatarFallback
-                      className={cn('text-xs font-semibold', avatarFallbackClassForName(patientLabel))}
+                      className={cn('text-xs font-semibold', avatarFallbackClassForName(patientNameLabel))}
                     >
-                      {shortPatientId(encounter.patientId).slice(0, 2).toUpperCase()}
+                      {initialsFromDisplayName(patientNameLabel)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
@@ -273,30 +352,32 @@ export function HomePage({
                             ev.stopPropagation()
                             onOpenEncounterPatient(encounter.id)
                           }}
-                          aria-label={`View demographics for ${patientLabel}`}
+                          aria-label={`View demographics for ${patientNameLabel}`}
                         >
                           <span className="min-w-0 flex-1 truncate font-bold text-foreground underline-offset-4 decoration-2 decoration-foreground hover:font-extrabold hover:underline">
-                            {patientLabel}
+                            {patientNameLabel}
                           </span>
                         </button>
                       ) : (
                         <span className="min-w-0 flex-1 truncate font-bold text-foreground">
-                          {patientLabel}
+                          {patientNameLabel}
                         </span>
                       )}
                       <p className="shrink-0 pl-2 text-right text-[11px] font-semibold leading-snug text-muted-foreground whitespace-nowrap">
                         {formatEncounterTime(encounter.encounterTime)}
                       </p>
                     </div>
-                    <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                      {encounter.careSetting}
+                    {patientMetaLine ? (
+                      <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
+                        {patientMetaLine}
+                      </p>
+                    ) : null}
+                    <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
+                      {patientIdLine}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span
-                        className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold uppercase text-secondary-foreground"
-                      >
-                        {encounter.status}
-                      </span>
+                      <EncounterStatusBadge status={encounter.status} />
+                      <EncounterSourceBadge source={encounter.emrSource} />
                     </div>
                   </div>
                 </div>

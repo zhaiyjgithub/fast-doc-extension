@@ -3,6 +3,11 @@ import { fastdocApiBaseUrl } from './env'
 export type EncounterSummary = {
   id: string
   patientId: string
+  patientFirstName: string | null
+  patientLastName: string | null
+  patientDateOfBirth: string | null
+  patientGender: string | null
+  patientDisplayId: string | null
   providerId: string | null
   encounterTime: string
   careSetting: string
@@ -11,6 +16,7 @@ export type EncounterSummary = {
   hasTranscript: boolean
   transcriptText: string | null
   latestEmr: Record<string, unknown> | null
+  emrSource: string | null
 }
 
 export type CreateEncounterPayload = {
@@ -25,6 +31,18 @@ export type ListEncountersOptions = {
   page?: number
   pageSize?: number
   todayOnly?: boolean
+}
+
+export type SearchEncountersOptions = {
+  q?: string
+  name?: string
+  dob?: string
+  mrn?: string
+  patientId?: string
+  clinicPatientId?: string
+  language?: string
+  page?: number
+  pageSize?: number
 }
 
 export class EncounterApiError extends Error {
@@ -54,6 +72,17 @@ function asOptionalNullableString(value: unknown): string | null | undefined {
     return null
   }
   return typeof value === 'string' ? value : undefined
+}
+
+function asOptionalDateString(value: unknown): string | null | undefined {
+  if (value === null) {
+    return null
+  }
+  if (typeof value !== 'string') {
+    return undefined
+  }
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
 }
 
 function asOptionalRecord(value: unknown): Record<string, unknown> | null | undefined {
@@ -136,6 +165,11 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
 
   const id = asNonEmptyString(payload.id)
   const patientId = asNonEmptyString(payload.patient_id)
+  const patientFirstName = asOptionalNullableString(payload.patient_first_name)
+  const patientLastName = asOptionalNullableString(payload.patient_last_name)
+  const patientDateOfBirth = asOptionalDateString(payload.patient_date_of_birth)
+  const patientGender = asOptionalNullableString(payload.patient_gender)
+  const patientDisplayId = asOptionalNullableString(payload.patient_display_id)
   const providerId = asOptionalNullableString(payload.provider_id)
   const encounterTime = asNonEmptyString(payload.encounter_time)
   const careSetting = asNonEmptyString(payload.care_setting)
@@ -143,6 +177,7 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
   const status = asNonEmptyString(payload.status)
   const transcriptText = asOptionalNullableString(payload.transcript_text)
   const latestEmr = asOptionalRecord(payload.latest_emr)
+  const emrSource = asOptionalNullableString(payload.emr_source)
   const hasTranscript = typeof payload.has_transcript === 'boolean' ? payload.has_transcript : undefined
 
   if (
@@ -151,10 +186,16 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
     !encounterTime ||
     !careSetting ||
     !status ||
+    patientFirstName === undefined ||
+    patientLastName === undefined ||
+    patientDateOfBirth === undefined ||
+    patientGender === undefined ||
+    patientDisplayId === undefined ||
     providerId === undefined ||
     chiefComplaint === undefined ||
     transcriptText === undefined ||
     latestEmr === undefined ||
+    emrSource === undefined ||
     hasTranscript === undefined
   ) {
     throw new Error('Encounter response payload is missing required fields.')
@@ -163,6 +204,11 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
   return {
     id,
     patientId,
+    patientFirstName,
+    patientLastName,
+    patientDateOfBirth,
+    patientGender,
+    patientDisplayId,
     providerId,
     encounterTime,
     careSetting,
@@ -171,6 +217,7 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
     hasTranscript,
     transcriptText,
     latestEmr,
+    emrSource,
   }
 }
 
@@ -290,4 +337,33 @@ export async function getEncounter(
   )
 
   return parseEncounterSummary(body)
+}
+
+export async function searchEncounters(
+  accessToken: string,
+  opts: SearchEncountersOptions = {},
+): Promise<EncounterSummary[]> {
+  const params = new URLSearchParams()
+  if (opts.q?.trim()) params.set('q', opts.q.trim())
+  if (opts.name?.trim()) params.set('name', opts.name.trim())
+  if (opts.dob?.trim()) params.set('dob', opts.dob.trim())
+  if (opts.mrn?.trim()) params.set('mrn', opts.mrn.trim())
+  if (opts.patientId?.trim()) params.set('patient_id', opts.patientId.trim())
+  if (opts.clinicPatientId?.trim()) params.set('clinic_patient_id', opts.clinicPatientId.trim())
+  if (opts.language?.trim()) params.set('language', opts.language.trim())
+  if (typeof opts.page === 'number') params.set('page', String(opts.page))
+  if (typeof opts.pageSize === 'number') params.set('page_size', String(opts.pageSize))
+
+  const query = params.toString()
+  const body = await requestEncounterEndpoint(
+    accessToken,
+    `/encounters/search${query ? `?${query}` : ''}`,
+    { method: 'GET' },
+    'Failed to search encounters.',
+  )
+
+  if (!Array.isArray(body)) {
+    throw new Error('Encounter search response payload is invalid.')
+  }
+  return body.map(parseEncounterSummary)
 }

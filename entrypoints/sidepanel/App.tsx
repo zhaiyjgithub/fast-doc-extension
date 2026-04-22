@@ -11,6 +11,7 @@ import { RecordingPage } from '@/pages/recording-page'
 import { SoapPage } from '@/pages/soap-page'
 import { TranscriptPage } from '@/pages/transcript-page'
 import { PatientDemographicPage } from '@/pages/patient-demographic-page'
+import { PatientDetailsPage } from '@/pages/patient-details-page'
 import { ProviderPage } from '@/pages/provider-page'
 import { SettingsPage } from '@/pages/settings-page'
 import {
@@ -27,6 +28,8 @@ import {
   EncounterApiError,
   getEncounter,
   listEncounters,
+  searchEncounters,
+  type SearchEncountersOptions,
   type EncounterSummary,
 } from '@/lib/encounter-api'
 import { EmrApiError, generateEmr, pollEmrTask, type EmrTaskSubmitted } from '@/lib/emr-api'
@@ -38,7 +41,7 @@ import {
 } from '@/lib/provider-session'
 import { getProviderProfile, providerDisplayName, type ProviderProfile } from '@/lib/mock-provider'
 import { getDemographicByEncounterId } from '@/lib/patient-demographic'
-import { PatientApiError, parseDemographicsTextWithLlm } from '@/lib/patient-api'
+import { PatientApiError, getPatientById, parseDemographicsTextWithLlm } from '@/lib/patient-api'
 import { Home, FileText, Mic, Settings } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -49,6 +52,7 @@ type AppPage =
   | 'soap'
   | 'transcript'
   | 'settings'
+  | 'patient-details'
   | 'patient-demographic'
   | 'provider'
 type SoapFlowPhase = 'idle'
@@ -80,9 +84,55 @@ type SyncChiefComplaintPayload = {
 
 const DEBUG_EMR_BRIDGE = true
 const NOTES_PAGE_SIZE = 10
+const NOTES_SEARCH_DEBOUNCE_MS = 350
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const MM_DD_YYYY_RE = /^(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/(\d{4})$/
+const YYYY_MM_DD_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 
 function patientDisplayName(patient: Patient): string {
   return `${patient.firstName} ${patient.lastName}`.trim()
+}
+
+function normalizeDobForApi(raw: string): string | null {
+  const v = raw.trim()
+  const slashMatch = MM_DD_YYYY_RE.exec(v)
+  if (slashMatch) {
+    const month = slashMatch[1].padStart(2, '0')
+    const day = slashMatch[2].padStart(2, '0')
+    const year = slashMatch[3]
+    return `${year}-${month}-${day}`
+  }
+  if (YYYY_MM_DD_RE.test(v)) {
+    return v
+  }
+  return null
+}
+
+function buildEncounterSearchOptionsFromQuery(raw: string): SearchEncountersOptions {
+  const query = raw.trim()
+  if (!query) {
+    return {}
+  }
+
+  const prefixed = query.match(/^(clinic\s*patient\s*id|patient\s*id|cpid)\s*:\s*(.+)$/i)
+  if (prefixed && prefixed[2]?.trim()) {
+    return { clinicPatientId: prefixed[2].trim() }
+  }
+
+  if (UUID_RE.test(query)) {
+    return { patientId: query }
+  }
+
+  const normalizedDob = normalizeDobForApi(query)
+  if (normalizedDob) {
+    return { dob: normalizedDob }
+  }
+
+  if (!query.includes(' ') && /\d/.test(query)) {
+    return { clinicPatientId: query }
+  }
+
+  return { q: query }
 }
 
 function logEmrDebug(scope: string, message: string, details?: unknown) {
@@ -125,6 +175,10 @@ export default function App() {
   const [patientSheetIntent, setPatientSheetIntent] = React.useState<'select' | 'match'>('select')
   const [isDark, setIsDark] = React.useState(false)
   const [soapFlowPhase, setSoapFlowPhase] = React.useState<SoapFlowPhase>('idle')
+  const [patientDetailsPatient, setPatientDetailsPatient] = React.useState<Patient | null>(null)
+  const [patientDetailsReturnPage, setPatientDetailsReturnPage] = React.useState<'home' | 'recording' | 'soap'>(
+    'recording',
+  )
   const [patientDemoEncounterId, setPatientDemoEncounterId] = React.useState<string | null>(null)
   const [patientDemoReturnTab, setPatientDemoReturnTab] = React.useState<'home' | 'notes'>('home')
   const [activeEncounterId, setActiveEncounterId] = React.useState<string | null>(null)
@@ -137,6 +191,8 @@ export default function App() {
   const [notesEncounters, setNotesEncounters] = React.useState<EncounterSummary[]>([])
   const [notesPage, setNotesPage] = React.useState(1)
   const [notesHasMore, setNotesHasMore] = React.useState(false)
+  const [notesSearchQuery, setNotesSearchQuery] = React.useState('')
+  const [notesDebouncedQuery, setNotesDebouncedQuery] = React.useState('')
   const [transcriptReturnPage, setTranscriptReturnPage] = React.useState<AppPage>('soap')
   const [isEmrGenerating, setIsEmrGenerating] = React.useState(false)
   const emrPollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
@@ -153,6 +209,7 @@ export default function App() {
       // no-op
     }
     setSoapFlowPhase('idle')
+    setPatientDetailsPatient(null)
     setPatientDemoEncounterId(null)
     setIsLoggedIn(false)
     setLoggedInUsername('')
@@ -168,6 +225,8 @@ export default function App() {
     setNotesEncounters([])
     setNotesPage(1)
     setNotesHasMore(false)
+    setNotesSearchQuery('')
+    setNotesDebouncedQuery('')
     setCurrentPage('home')
     toast.warning('Session expired. Please sign in again.')
   }, [])
@@ -249,7 +308,7 @@ export default function App() {
   )
 
   const loadNotesEncountersPage = React.useCallback(
-    async (page: number, showToastOnError = true) => {
+    async (page: number, query: string, showToastOnError = true) => {
       if (!accessToken || !isLoggedIn) {
         setNotesEncounters([])
         setNotesHasMore(false)
@@ -257,9 +316,18 @@ export default function App() {
       }
 
       try {
-        const encounters = await withAuthRetry((token) =>
-          listEncounters(token, { page, pageSize: NOTES_PAGE_SIZE }),
-        )
+        const trimmedQuery = query.trim()
+        const encounters = await withAuthRetry((token) => {
+          if (trimmedQuery) {
+            const smartSearch = buildEncounterSearchOptionsFromQuery(trimmedQuery)
+            return searchEncounters(token, {
+              ...smartSearch,
+              page,
+              pageSize: NOTES_PAGE_SIZE,
+            })
+          }
+          return listEncounters(token, { page, pageSize: NOTES_PAGE_SIZE })
+        })
         setNotesEncounters(encounters)
         setNotesHasMore(encounters.length >= NOTES_PAGE_SIZE)
       } catch (error) {
@@ -335,7 +403,11 @@ export default function App() {
   )
 
   const handleGenerateEMR = React.useCallback(
-    async (transcript: string, conversationDurationSeconds?: number) => {
+    async (
+      transcript: string,
+      conversationDurationSeconds?: number,
+      source: 'voice' | 'paste' = 'voice',
+    ) => {
       if (!isLoggedIn || !accessToken) {
         toast.warning('Please sign in before generating EMR.')
         return
@@ -392,6 +464,7 @@ export default function App() {
             providerId,
             transcript: trimmedTranscript,
             conversationDurationSeconds,
+            source,
           }),
         )
       } catch (error) {
@@ -416,15 +489,17 @@ export default function App() {
         if (poll.status === 'finished') {
           clearInterval(emrPollIntervalRef.current!)
           emrPollIntervalRef.current = null
-          const [detail, report] = await Promise.all([
-            withAuthRetry((token) => getEncounter(token, pollEncounterId)),
-            withAuthRetry((token) => getEncounterReport(token, pollEncounterId)),
-          ])
-          setActiveEncounterDetail(detail)
-          setActiveEncounterSummary(detail)
+          const report = await withAuthRetry((token) => getEncounterReport(token, pollEncounterId))
           setActiveEncounterReport(report)
-          await refreshTodayEncounters(false)
+          try {
+            const detail = await withAuthRetry((token) => getEncounter(token, pollEncounterId))
+            setActiveEncounterDetail(detail)
+            setActiveEncounterSummary(detail)
+          } catch {
+            // Keep SOAP display working even if detail refresh fails.
+          }
           setIsEmrGenerating(false)
+          await refreshTodayEncounters(false)
           toast.success('SOAP note ready')
         } else if (poll.status === 'failed') {
           clearInterval(emrPollIntervalRef.current!)
@@ -492,6 +567,7 @@ export default function App() {
 
   function handleNavChange(id: AppPage) {
     setSoapFlowPhase('idle')
+    setPatientDetailsPatient(null)
     setPatientDemoEncounterId(null)
     setCurrentPage(id)
   }
@@ -514,6 +590,40 @@ export default function App() {
   function closeProviderPage() {
     setCurrentPage('settings')
   }
+
+  const openPatientDetails = React.useCallback(
+    async (from: 'home' | 'recording' | 'soap') => {
+      setPatientDetailsReturnPage(from)
+
+      let targetPatient = patient
+      const encounterPatientId = activeEncounterDetail?.patientId ?? activeEncounterSummary?.patientId
+
+      if (!targetPatient && from === 'soap' && encounterPatientId) {
+        try {
+          const fetched = await withAuthRetry((token) => getPatientById(token, encounterPatientId))
+          targetPatient = fetched
+          setPatient(fetched)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unable to load patient details.'
+          toast.warning(message)
+          return
+        }
+      }
+
+      if (!targetPatient) {
+        toast.warning('Select or match a patient first.')
+        return
+      }
+
+      setPatientDetailsPatient(targetPatient)
+      setCurrentPage('patient-details')
+    },
+    [activeEncounterDetail?.patientId, activeEncounterSummary?.patientId, patient, withAuthRetry],
+  )
+
+  const closePatientDetails = React.useCallback(() => {
+    setCurrentPage(patientDetailsReturnPage)
+  }, [patientDetailsReturnPage])
 
   // Sync dark mode class on <html>
   React.useEffect(() => {
@@ -658,8 +768,15 @@ export default function App() {
     if (currentPage !== 'notes') {
       return
     }
-    void loadNotesEncountersPage(notesPage, false)
-  }, [currentPage, loadNotesEncountersPage, notesPage])
+    void loadNotesEncountersPage(notesPage, notesDebouncedQuery, false)
+  }, [currentPage, loadNotesEncountersPage, notesDebouncedQuery, notesPage])
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setNotesDebouncedQuery(notesSearchQuery.trim())
+    }, NOTES_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [notesSearchQuery])
 
   async function handleLogin(username: string, password: string) {
     if (isLoggingIn) {
@@ -719,6 +836,7 @@ export default function App() {
         // Do not block logout on provider profile storage cleanup.
       }
       setSoapFlowPhase('idle')
+      setPatientDetailsPatient(null)
       setPatientDemoEncounterId(null)
       setIsLoggedIn(false)
       setLoggedInUsername('')
@@ -734,6 +852,8 @@ export default function App() {
       setNotesEncounters([])
       setNotesPage(1)
       setNotesHasMore(false)
+      setNotesSearchQuery('')
+      setNotesDebouncedQuery('')
       setCurrentPage('home')
       toast.info('Signed out')
     }
@@ -883,6 +1003,7 @@ export default function App() {
     soap: 'AI EMR',
     transcript: 'Transcript',
     settings: 'Settings',
+    'patient-details': 'Patient details',
     'patient-demographic': 'Patient demographics',
     provider: 'Provider',
   }
@@ -919,6 +1040,8 @@ export default function App() {
           onBack={
             currentPage === 'patient-demographic'
               ? closePatientDemographic
+              : currentPage === 'patient-details'
+                ? closePatientDetails
               : currentPage === 'transcript'
                 ? () => setCurrentPage(transcriptReturnPage)
               : currentPage === 'provider'
@@ -936,8 +1059,10 @@ export default function App() {
             doctorDisplayName={providerProfile ? providerDisplayName(providerProfile) : undefined}
             providerSpecialty={providerProfile?.specialty}
             clinicSiteLabel={providerProfile?.siteLabel}
+            clinicName={providerProfile?.clinicName}
             onChangePatient={() => openPatientSheet('select')}
             onClearSelectedPatient={() => setPatient(null)}
+            onOpenSelectedPatientDetail={() => void openPatientDetails('home')}
             onOpenMatchPatientPicker={() => openPatientSheet('match')}
             onNavigate={(page) => handleNavChange(page)}
             encounters={homeEncounters}
@@ -948,6 +1073,11 @@ export default function App() {
           <NotesPage
             patientId={patient?.id}
             encounters={notesEncounters}
+            searchQuery={notesSearchQuery}
+            onSearchQueryChange={(value) => {
+              setNotesSearchQuery(value)
+              setNotesPage(1)
+            }}
             page={notesPage}
             hasMore={notesHasMore}
             onPrevPage={() => setNotesPage((prev) => Math.max(1, prev - 1))}
@@ -962,6 +1092,7 @@ export default function App() {
             onOpenPatientPicker={() => openPatientSheet('select')}
             onTapMatchPatient={handleTapMatchPatient}
             onDismissActivePatient={handleDismissActiveRecordingPatient}
+            onOpenPatientDetail={() => void openPatientDetails('recording')}
           />
         )}
         {currentPage === 'soap' && (
@@ -972,6 +1103,7 @@ export default function App() {
             encounterSummary={activeEncounterSummary}
             isGenerating={isEmrGenerating}
             onOpenPatientPicker={() => openPatientSheet('select')}
+            onOpenPatientDetail={() => void openPatientDetails('soap')}
             onOpenTranscript={() => {
               setTranscriptReturnPage('soap')
               setCurrentPage('transcript')
@@ -984,6 +1116,9 @@ export default function App() {
             patient={soapPatient}
             encounter={activeEncounterDetail ?? activeEncounterSummary}
           />
+        )}
+        {currentPage === 'patient-details' && patientDetailsPatient && (
+          <PatientDetailsPage patient={patientDetailsPatient} />
         )}
         {currentPage === 'settings' && (
           <SettingsPage
@@ -1009,6 +1144,12 @@ export default function App() {
         value={
           currentPage === 'patient-demographic'
             ? patientDemoReturnTab
+            : currentPage === 'patient-details'
+              ? patientDetailsReturnPage === 'home'
+                ? 'home'
+                : patientDetailsReturnPage === 'recording'
+                ? 'recording'
+                : 'notes'
             : currentPage === 'provider'
               ? 'settings'
               : currentPage

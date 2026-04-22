@@ -31,6 +31,7 @@ export type EmrSummary = {
   isFinal: boolean
   requestId: string | null
   conversationDurationSeconds: number | null
+  source: string | null
 }
 
 export type EncounterReport = {
@@ -67,7 +68,10 @@ function asOptionalString(value: unknown): string | null | undefined {
   if (value === null) {
     return null
   }
-  return asNonEmptyString(value) ?? undefined
+  if (typeof value === 'string') {
+    return value
+  }
+  return undefined
 }
 
 function asOptionalNumber(value: unknown): number | null | undefined {
@@ -221,9 +225,17 @@ function parseEmrSummary(payload: unknown): EmrSummary {
   const noteText = asOptionalString(payload.note_text)
   const requestId = asOptionalString(payload.request_id)
   const duration = asOptionalNumber(payload.conversation_duration_seconds)
+  const source = asOptionalString(payload.source)
   const isFinal = typeof payload.is_final === 'boolean' ? payload.is_final : undefined
 
-  if (!noteId || noteText === undefined || requestId === undefined || duration === undefined || isFinal === undefined) {
+  if (
+    !noteId ||
+    noteText === undefined ||
+    requestId === undefined ||
+    duration === undefined ||
+    source === undefined ||
+    isFinal === undefined
+  ) {
     throw new Error('Report EMR payload is missing required fields.')
   }
 
@@ -234,6 +246,7 @@ function parseEmrSummary(payload: unknown): EmrSummary {
     isFinal,
     requestId,
     conversationDurationSeconds: duration,
+    source,
   }
 }
 

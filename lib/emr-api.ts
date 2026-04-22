@@ -8,6 +8,7 @@ export type GenerateEmrPayload = {
   transcript: string
   requestId?: string | null
   conversationDurationSeconds?: number | null
+  source?: 'voice' | 'paste' | null
 }
 
 export type EmrCodeSuggestion = {
@@ -17,7 +18,6 @@ export type EmrCodeSuggestion = {
   confidence: number | null
   rationale: string | null
   status: string | null
-  page: number | null
 }
 
 export type GenerateEmrResult = {
@@ -48,7 +48,7 @@ export type EmrTaskSubmitted = {
 
 export type EmrTaskStatus =
   | { taskId: string; status: 'pending' | 'running' }
-  | { taskId: string; status: 'finished'; result: GenerateEmrResult }
+  | { taskId: string; status: 'finished' }
   | { taskId: string; status: 'failed'; error: string }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -178,7 +178,6 @@ function parseCodeSuggestion(payload: unknown): EmrCodeSuggestion {
     confidence: asOptionalNumber(payload.confidence) ?? null,
     rationale: rationaleRaw === undefined ? null : rationaleRaw || null,
     status: statusRaw === undefined ? null : statusRaw || null,
-    page: asOptionalNumber(payload.page) ?? null,
   }
 }
 
@@ -270,6 +269,7 @@ export async function generateEmr(
         transcript,
         request_id: payload.requestId?.trim() || undefined,
         conversation_duration_seconds: payload.conversationDurationSeconds ?? undefined,
+        source: payload.source ?? undefined,
       }),
     },
     'Failed to submit EMR generation.',
@@ -297,8 +297,7 @@ export async function pollEmrTask(
   if (!taskStatus) throw new EmrApiError('Missing status in task poll response.')
 
   if (taskStatus === 'finished') {
-    const resultRaw = isPlainObject(body.result) ? body.result : body
-    return { taskId, status: 'finished', result: parseGenerateEmrResult(resultRaw) }
+    return { taskId, status: 'finished' }
   }
   if (taskStatus === 'failed') {
     return { taskId, status: 'failed', error: asNonEmptyString(body.error) ?? 'Unknown error' }

@@ -15,6 +15,8 @@ import { motion, type Variants } from 'motion/react'
 import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
 import type { EncounterSummary } from '@/lib/encounter-api'
 import { cn } from '@/lib/utils'
+import { EncounterStatusBadge } from '@/components/encounter/encounter-status-badge'
+import { EncounterSourceBadge } from '@/components/encounter/encounter-source-badge'
 
 /** Aligned with `soap-page.tsx` / patient demographic list motion. */
 const notesPageListVariants: Variants = {
@@ -36,6 +38,8 @@ const notesPageItemVariants: Variants = {
 interface NotesPageProps {
   patientId?: string
   encounters: EncounterSummary[]
+  searchQuery: string
+  onSearchQueryChange: (value: string) => void
   page: number
   hasMore: boolean
   onPrevPage: () => void
@@ -54,34 +58,82 @@ function shortPatientId(patientId: string): string {
   return patientId.slice(0, 8) || patientId
 }
 
+function formatDobDisplay(value: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return new Intl.DateTimeFormat('en-US', {
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+  }).format(parsed)
+}
+
+function ageFromDob(value: string): string | null {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  const now = new Date()
+  let age = now.getFullYear() - parsed.getFullYear()
+  const monthDelta = now.getMonth() - parsed.getMonth()
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < parsed.getDate())) {
+    age -= 1
+  }
+  if (!Number.isFinite(age) || age < 0) return null
+  return `${age}y`
+}
+
+function initialsFromDisplayName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    const a = parts[0]?.[0]
+    const b = parts[parts.length - 1]?.[0]
+    if (a && b) return (a + b).toUpperCase()
+  }
+  const one = parts[0] ?? name.trim()
+  if (one.length >= 2) return one.slice(0, 2).toUpperCase()
+  return (one[0] ?? '?').toUpperCase()
+}
+
+function encounterPatientName(encounter: EncounterSummary): string {
+  const first = encounter.patientFirstName?.trim() ?? ''
+  const last = encounter.patientLastName?.trim() ?? ''
+  const full = `${first} ${last}`.trim()
+  if (full) return full
+  return `Patient ${shortPatientId(encounter.patientId)}`
+}
+
+function encounterPatientMeta(encounter: EncounterSummary): string {
+  const dob = encounter.patientDateOfBirth ? `DOB: ${formatDobDisplay(encounter.patientDateOfBirth)}` : null
+  const age = encounter.patientDateOfBirth ? ageFromDob(encounter.patientDateOfBirth) : null
+  const gender = encounter.patientGender?.trim() || null
+  return [dob, age, gender].filter(Boolean).join(' · ')
+}
+
+function encounterPatientIdLabel(encounter: EncounterSummary): string {
+  const displayId = encounter.patientDisplayId?.trim()
+  if (displayId) return `Patient ID: ${displayId}`
+  return `Patient ID: ${shortPatientId(encounter.patientId)}`
+}
+
 function formatEncounterTime(timestamp: string): string {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) {
     return timestamp
   }
-  return date.toLocaleString([], {
+  return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: '2-digit',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  })
-}
-
-function encounterMatchesQuery(encounter: EncounterSummary, raw: string): boolean {
-  const q = raw.trim().toLowerCase()
-  if (!q) return true
-  const patientLabel = `patient ${shortPatientId(encounter.patientId)}`.toLowerCase()
-  if (patientLabel.includes(q)) return true
-  if (encounter.patientId.toLowerCase().includes(q)) return true
-  if (encounter.status.toLowerCase().includes(q)) return true
-  if (encounter.careSetting.toLowerCase().includes(q)) return true
-  if (formatEncounterTime(encounter.encounterTime).toLowerCase().includes(q)) return true
-  return encounter.encounterTime.toLowerCase().includes(q)
+    hour12: true,
+  }).format(date)
 }
 
 export function NotesPage({
   patientId: _patientId,
   encounters,
+  searchQuery,
+  onSearchQueryChange,
   page,
   hasMore,
   onPrevPage,
@@ -89,13 +141,6 @@ export function NotesPage({
   onOpenEncounter,
   onOpenEncounterPatient,
 }: NotesPageProps) {
-  const [searchQuery, setSearchQuery] = React.useState('')
-
-  const filteredEncounters = React.useMemo(
-    () => encounters.filter((encounter) => encounterMatchesQuery(encounter, searchQuery)),
-    [encounters, searchQuery],
-  )
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       <motion.div
@@ -112,13 +157,13 @@ export function NotesPage({
           <Input
             type="search"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by patient ID, status, or care setting…"
+            onChange={(e) => onSearchQueryChange(e.target.value)}
+            placeholder="Search encounters by name, DOB (MM/DD/YYYY), MRN, UUID, or Patient ID…"
             className={cn(
               'h-9 rounded-md border border-border/50 bg-muted/25 pl-9 shadow-none',
               'transition-colors focus-visible:border-border focus-visible:ring-1 focus-visible:ring-ring',
             )}
-            aria-label="Search encounters by patient ID, status, care setting, or encounter time"
+            aria-label="Search encounters by name, DOB, MRN, UUID, or patient ID"
           />
         </div>
       </motion.div>
@@ -133,17 +178,21 @@ export function NotesPage({
           <motion.h2 variants={notesPageItemVariants} className="text-lg font-bold text-foreground">
             Encounters
           </motion.h2>
-          {filteredEncounters.length === 0 && (
+          {encounters.length === 0 && (
             <motion.div
               variants={notesPageItemVariants}
               className="flex flex-col items-center gap-2 py-12 text-muted-foreground"
             >
               <FileText className="h-8 w-8" />
-              <p className="text-center text-sm">No encounters match your search.</p>
+              <p className="text-center text-sm">
+                {searchQuery.trim() ? 'No encounters match your search.' : 'No encounters found.'}
+              </p>
             </motion.div>
           )}
-          {filteredEncounters.map((encounter) => {
-            const patientLabel = `Patient ${shortPatientId(encounter.patientId)}`
+          {encounters.map((encounter) => {
+            const patientNameLabel = encounterPatientName(encounter)
+            const patientMetaLine = encounterPatientMeta(encounter)
+            const patientIdLine = encounterPatientIdLabel(encounter)
             return (
             <motion.div
               key={encounter.id}
@@ -155,9 +204,9 @@ export function NotesPage({
             >
               <Avatar className="size-12 shrink-0 rounded-full">
                 <AvatarFallback
-                  className={cn('text-xs font-semibold', avatarFallbackClassForName(patientLabel))}
+                  className={cn('text-xs font-semibold', avatarFallbackClassForName(patientNameLabel))}
                 >
-                  {shortPatientId(encounter.patientId).slice(0, 2).toUpperCase()}
+                  {initialsFromDisplayName(patientNameLabel)}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
@@ -170,30 +219,32 @@ export function NotesPage({
                         ev.stopPropagation()
                         onOpenEncounterPatient(encounter.id)
                       }}
-                      aria-label={`View demographics for ${patientLabel}`}
+                      aria-label={`View demographics for ${patientNameLabel}`}
                     >
                       <span className="min-w-0 flex-1 truncate font-bold text-foreground underline-offset-4 decoration-2 decoration-foreground hover:font-extrabold hover:underline">
-                        {patientLabel}
+                        {patientNameLabel}
                       </span>
                     </button>
                   ) : (
                     <span className="min-w-0 flex-1 truncate font-bold text-foreground">
-                      {patientLabel}
+                      {patientNameLabel}
                     </span>
                   )}
                   <p className="shrink-0 pl-2 text-right text-[11px] font-semibold leading-snug text-muted-foreground whitespace-nowrap">
                     {formatEncounterTime(encounter.encounterTime)}
                   </p>
                 </div>
-                <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                  {encounter.careSetting}
+                {patientMetaLine ? (
+                  <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
+                    {patientMetaLine}
+                  </p>
+                ) : null}
+                <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
+                  {patientIdLine}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span
-                    className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold uppercase text-secondary-foreground"
-                  >
-                    {encounter.status}
-                  </span>
+                  <EncounterStatusBadge status={encounter.status} />
+                  <EncounterSourceBadge source={encounter.emrSource} />
                 </div>
               </div>
             </motion.div>

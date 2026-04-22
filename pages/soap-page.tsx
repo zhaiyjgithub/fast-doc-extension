@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { format, parseISO, isValid } from 'date-fns'
+import { differenceInYears, format, isValid, parseISO } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -32,6 +32,8 @@ import {
 import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
+import { EncounterSourceBadge } from '@/components/encounter/encounter-source-badge'
 import type { Patient } from '@/components/patient/patient-search-sheet'
 import type { EncounterSummary } from '@/lib/encounter-api'
 import type {
@@ -47,6 +49,7 @@ interface SoapPageProps {
   isGenerating?: boolean
   /** Opens patient search sheet when no patient is selected. */
   onOpenPatientPicker?: () => void
+  onOpenPatientDetail?: () => void
   onOpenTranscript?: () => void
   onSyncToEmr?: (payload: {
     chiefComplaintText: string
@@ -62,39 +65,30 @@ const SECTIONS: {
   label: string
   borderClass: string
   labelClass: string
-  defaultBody: string
 }[] = [
   {
     id: 'subjective',
     label: 'Subjective',
     borderClass: 'border-l-blue-400',
     labelClass: 'text-blue-500',
-    defaultBody:
-      'Patient presents with persistent cough for 3 days. Describes it as dry and hacking, worse at night. Denies fever or chills. Reports mild fatigue but no shortness of breath. History of seasonal allergies.',
   },
   {
     id: 'objective',
     label: 'Objective',
     borderClass: 'border-l-emerald-400',
     labelClass: 'text-emerald-500',
-    defaultBody:
-      'Vitals: BP 122/80, HR 72, Temp 98.6F, SpO2 99% on RA. Lungs: Mild end-expiratory wheezing bilaterally. Throat: Erythema noted, no exudate. Tympanic membranes clear. Heart: RRR, no murmurs.',
   },
   {
     id: 'assessment',
     label: 'Assessment',
     borderClass: 'border-l-amber-400',
     labelClass: 'text-amber-600',
-    defaultBody:
-      '1. Acute Bronchitis - likely viral.\n2. Reactive Airway Disease - secondary to URI.\n3. Seasonal Allergic Rhinitis.',
   },
   {
     id: 'plan',
     label: 'Plan',
     borderClass: 'border-l-indigo-400',
     labelClass: 'text-indigo-500',
-    defaultBody:
-      'Prescribed Albuterol inhaler 1-2 puffs q4-6h prn cough/wheeze. Supportive care: hydration and rest. Follow up in 7 days if symptoms do not improve. Patient advised on red flags.',
   },
 ]
 
@@ -110,65 +104,6 @@ interface ReportCodeSuggestion {
   status: string
   evidence: ReportCodeEvidence[]
 }
-
-const ICD_SUGGESTIONS: ReportCodeSuggestion[] = [
-  {
-    id: 'htn',
-    code: 'I10',
-    codeType: 'ICD',
-    rank: 1,
-    condition: 'HTN',
-    description: 'Essential (primary) hypertension',
-    confidence: 0.95,
-    rationale:
-      'Documented as a reason for visit with elevated blood pressure readings (140s) and associated symptoms of headache/dizziness.',
-    status: 'needs_review',
-    evidence: [{ evidenceRoute: 'llm_icd', excerpt: 'Elevated blood pressure readings in 140s.' }],
-  },
-  {
-    id: 'knee',
-    code: 'Z96.653',
-    codeType: 'ICD',
-    rank: 2,
-    condition: 'History of bilateral knee replacement',
-    description: 'Presence of artificial knee joint, bilateral',
-    confidence: 0.88,
-    rationale:
-      'Prior operative reports and implant documentation reviewed; relevant to surgical planning and medication counseling.',
-    status: 'needs_review',
-    evidence: [{ evidenceRoute: 'patient_rag', excerpt: 'Bilateral TKA present in surgical history.' }],
-  },
-]
-
-const CPT_SUGGESTIONS: ReportCodeSuggestion[] = [
-  {
-    id: '99213',
-    code: '99213',
-    codeType: 'CPT',
-    rank: 1,
-    condition: 'Established office visit',
-    description:
-      'Office or other outpatient visit for the evaluation and management of an established patient; 20–29 minutes typically spent.',
-    confidence: 0.88,
-    rationale:
-      'Acute bronchitis with prescription management and patient education; MDM and documentation support 99213 level.',
-    status: 'needs_review',
-    evidence: [{ evidenceRoute: 'llm_cpt', excerpt: 'Problem-focused visit with medication management.' }],
-  },
-  {
-    id: '94640',
-    code: '94640',
-    codeType: 'CPT',
-    rank: 2,
-    condition: 'Nebulizer treatment',
-    description:
-      'Pressurized or nonpressurized inhalation treatment for acute airway obstruction or for diagnostic purposes.',
-    confidence: 0.82,
-    rationale: 'Albuterol administered via nebulizer during visit for wheeze and cough.',
-    status: 'needs_review',
-    evidence: [{ evidenceRoute: 'llm_cpt', excerpt: 'Inhalation therapy given during encounter.' }],
-  },
-]
 
 /** Matches SOAP section cards for consistent width and chrome. */
 const clinicalCodeCardClass =
@@ -206,6 +141,13 @@ function formatDob(iso: string) {
   return format(d, 'MM/dd/yyyy')
 }
 
+function formatAgeFromDob(iso: string): string | null {
+  const d = parseISO(iso)
+  if (!isValid(d)) return null
+  const years = differenceInYears(new Date(), d)
+  return Number.isFinite(years) && years >= 0 ? `${years}y` : null
+}
+
 function patientDisplayName(patient: Patient): string {
   return `${patient.firstName} ${patient.lastName}`.trim()
 }
@@ -218,7 +160,7 @@ function formatSuggestionStatus(status: string): string {
 }
 
 function suggestionTitle(suggestion: ReportCodeSuggestion): string {
-  return suggestion.condition?.trim() || suggestion.description?.trim() || suggestion.code
+  return suggestion.description?.trim() || suggestion.condition?.trim() || suggestion.code
 }
 
 function toViewSuggestion(
@@ -257,6 +199,8 @@ function ClinicalCodeCard({
   descriptionFieldLabel,
   rationale,
   confidence,
+  expanded,
+  onToggleExpand,
   onOpenDetail,
 }: {
   borderAccentClass: string
@@ -268,6 +212,8 @@ function ClinicalCodeCard({
   descriptionFieldLabel: string
   rationale: string
   confidence?: number | null
+  expanded: boolean
+  onToggleExpand: () => void
   onOpenDetail: () => void
 }) {
   function handleCopyCode(e: React.MouseEvent | React.PointerEvent) {
@@ -280,65 +226,82 @@ function ClinicalCodeCard({
   }
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpenDetail}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onOpenDetail()
-        }
-      }}
-      aria-haspopup="dialog"
-      className={cn(
-        clinicalCodeCardClass,
-        borderAccentClass,
-        'w-full cursor-pointer text-left transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-      )}
-    >
+    <div className={cn(clinicalCodeCardClass, borderAccentClass, 'w-full')}>
       <div className="mb-3 flex items-start justify-between gap-3">
-        <span className="min-w-0 flex-1 text-base font-bold leading-snug text-foreground">{title}</span>
-        <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground/50" aria-hidden />
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          aria-expanded={expanded}
+        >
+          <span className="min-w-0 flex-1 text-base font-bold leading-snug text-foreground">{title}</span>
+          {expanded ? (
+            <ChevronUp className="mt-0.5 size-4 shrink-0 text-muted-foreground/50" aria-hidden />
+          ) : (
+            <ChevronDown className="mt-0.5 size-4 shrink-0 text-muted-foreground/50" aria-hidden />
+          )}
+        </button>
       </div>
 
-      <p className="mb-3 text-sm text-foreground">
-        <span className="text-muted-foreground">Status: </span>
-        <span className="inline-flex rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
-          {formatSuggestionStatus(status)}
-        </span>
-      </p>
-
-      <div className="space-y-3 text-sm leading-relaxed">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-muted-foreground">{codeFieldLabel}:</span>
-          <span className="font-mono font-medium text-foreground">{code}</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
-            aria-label={`Copy code ${code}`}
-            onClick={handleCopyCode}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <Copy className="size-4" aria-hidden />
-          </Button>
-        </div>
-        <p>
-          <span className="text-muted-foreground">{descriptionFieldLabel}: </span>
-          <span className="text-foreground/90">{description}</span>
+      {expanded ? (
+        <p className="mb-3 text-sm text-foreground">
+          <span className="text-muted-foreground">Status: </span>
+          <span className="inline-flex rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
+            {formatSuggestionStatus(status)}
+          </span>
         </p>
-        {typeof confidence === 'number' ? (
+      ) : null}
+
+      {!expanded ? (
+        <p className="mb-3 text-sm text-foreground">
+          <span className="text-muted-foreground">{codeFieldLabel}: </span>
+          <span className="font-mono font-medium text-foreground">{code}</span>
+        </p>
+      ) : null}
+
+      {expanded ? (
+        <div className="space-y-3 text-sm leading-relaxed">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-muted-foreground">{codeFieldLabel}:</span>
+            <span className="font-mono font-medium text-foreground">{code}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+              aria-label={`Copy code ${code}`}
+              onClick={handleCopyCode}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <Copy className="size-4" aria-hidden />
+            </Button>
+          </div>
           <p>
-            <span className="text-muted-foreground">Confidence: </span>
-            <span className="text-foreground/90">{Math.round(confidence * 100)}%</span>
+            <span className="text-muted-foreground">{descriptionFieldLabel}: </span>
+            <span className="text-foreground/90">{description}</span>
           </p>
-        ) : null}
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Rationale</p>
-          <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{rationale}</p>
+          {typeof confidence === 'number' ? (
+            <p>
+              <span className="text-muted-foreground">Confidence: </span>
+              <span className="text-foreground/90">{Math.round(confidence * 100)}%</span>
+            </p>
+          ) : null}
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Rationale</p>
+            <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{rationale}</p>
+          </div>
         </div>
+      ) : null}
+      <div className={cn('mt-3', !expanded && 'mt-0')}>
+        <button
+          type="button"
+          onClick={onOpenDetail}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+          aria-haspopup="dialog"
+        >
+          View detail
+          <ChevronRight className="size-3.5" aria-hidden />
+        </button>
       </div>
     </div>
   )
@@ -614,15 +577,9 @@ function SyncTransferOverlay({ open }: { open: boolean }) {
   )
 }
 
-function initialBodiesFromReport(
-  encounterReport?: EncounterReport | null,
-  useDemoFallback = true,
-): Record<SectionId, string> {
+function initialBodiesFromReport(encounterReport?: EncounterReport | null): Record<SectionId, string> {
   const soapNote = encounterReport?.emr?.soapNote
   if (!soapNote) {
-    if (useDemoFallback) {
-      return Object.fromEntries(SECTIONS.map((s) => [s.id, s.defaultBody])) as Record<SectionId, string>
-    }
     return {
       subjective: '',
       objective: '',
@@ -645,6 +602,7 @@ export function SoapPage({
   encounterSummary,
   isGenerating,
   onOpenPatientPicker,
+  onOpenPatientDetail,
   onOpenTranscript,
   onSyncToEmr,
 }: SoapPageProps) {
@@ -652,16 +610,18 @@ export function SoapPage({
   const [expanded, setExpanded] = React.useState<Record<SectionId, boolean>>(() =>
     Object.fromEntries(SECTIONS.map((s) => [s.id, true])) as Record<SectionId, boolean>,
   )
-  const [bodies, setBodies] = React.useState<Record<SectionId, string>>(() =>
-    initialBodiesFromReport(encounterReport, !hasEncounterContext),
-  )
+  const [bodies, setBodies] = React.useState<Record<SectionId, string>>(() => initialBodiesFromReport(encounterReport))
   const [isEditing, setIsEditing] = React.useState(false)
   const [codeDetail, setCodeDetail] = React.useState<ClinicalCodeDetail | null>(null)
   const [isSyncAnimating, setIsSyncAnimating] = React.useState(false)
+  const [icdSectionExpanded, setIcdSectionExpanded] = React.useState(true)
+  const [cptSectionExpanded, setCptSectionExpanded] = React.useState(true)
+  const [icdExpanded, setIcdExpanded] = React.useState<Record<string, boolean>>({})
+  const [cptExpanded, setCptExpanded] = React.useState<Record<string, boolean>>({})
 
   React.useEffect(() => {
-    setBodies(initialBodiesFromReport(encounterReport, !hasEncounterContext))
-  }, [encounterReport, hasEncounterContext])
+    setBodies(initialBodiesFromReport(encounterReport))
+  }, [encounterReport])
 
   const icdSuggestions = React.useMemo(
     () =>
@@ -669,10 +629,8 @@ export function SoapPage({
         ? encounterReport.icdSuggestions.map((row, index) =>
             toViewSuggestion(row, 'ICD', `icd-${row.code}-${row.rank}-${index}`),
           )
-        : hasEncounterContext
-          ? []
-          : ICD_SUGGESTIONS,
-    [encounterReport, hasEncounterContext],
+        : [],
+    [encounterReport],
   )
 
   const cptSuggestions = React.useMemo(
@@ -681,13 +639,20 @@ export function SoapPage({
         ? encounterReport.cptSuggestions.map((row, index) =>
             toViewSuggestion(row, 'CPT', `cpt-${row.code}-${row.rank}-${index}`),
           )
-        : hasEncounterContext
-          ? []
-          : CPT_SUGGESTIONS,
-    [encounterReport, hasEncounterContext],
+        : [],
+    [encounterReport],
   )
 
+  React.useEffect(() => {
+    setIcdExpanded((prev) => Object.fromEntries(icdSuggestions.map((row) => [row.id, prev[row.id] ?? true])))
+  }, [icdSuggestions])
+
+  React.useEffect(() => {
+    setCptExpanded((prev) => Object.fromEntries(cptSuggestions.map((row) => [row.id, prev[row.id] ?? true])))
+  }, [cptSuggestions])
+
   const allExpanded = SECTIONS.every((s) => expanded[s.id])
+  const emrSource = encounterReport?.emr?.source ?? encounterSummary?.emrSource ?? null
 
   function toggleExpandAll() {
     const next = !allExpanded
@@ -759,17 +724,32 @@ export function SoapPage({
   }
 
   const patientHeaderShellClass =
-    'flex w-full items-center justify-between gap-3 rounded-lg bg-primary/20 p-4 shadow-sm ring-1 ring-primary/15'
+    'relative flex w-full items-center justify-between gap-3 rounded-lg bg-primary/25 p-4 shadow-sm ring-1 ring-primary/20'
 
   const patientHeaderBody = (
     <>
       <div className="flex min-w-0 items-center gap-3">
         <Avatar className="size-12 shrink-0 border-2 border-background">
-          <AvatarFallback className="bg-primary/30 text-sm font-bold text-primary">
+          <AvatarFallback
+            className={cn(
+              'text-xs font-semibold',
+              avatarFallbackClassForName(
+                patient
+                  ? patientDisplayName(patient)
+                  : encounterSummary?.patientFirstName || encounterSummary?.patientLastName
+                    ? `${encounterSummary?.patientFirstName ?? ''} ${encounterSummary?.patientLastName ?? ''}`.trim()
+                    : encounterSummary?.patientId ?? 'Patient',
+              ),
+            )}
+          >
             {patient
               ? initialsFromName(patientDisplayName(patient))
-              : encounterSummary?.patientId
-                ? encounterSummary.patientId.slice(0, 2).toUpperCase()
+              : encounterSummary?.patientFirstName || encounterSummary?.patientLastName
+                ? initialsFromName(
+                    `${encounterSummary?.patientFirstName ?? ''} ${encounterSummary?.patientLastName ?? ''}`.trim(),
+                  )
+                : encounterSummary?.patientId
+                  ? encounterSummary.patientId.slice(0, 2).toUpperCase()
                 : '—'}
           </AvatarFallback>
         </Avatar>
@@ -777,28 +757,75 @@ export function SoapPage({
           <h2 className="truncate font-bold text-foreground">
             {patient
               ? patientDisplayName(patient)
-              : encounterSummary?.patientId
-                ? `Encounter patient ${encounterSummary.patientId.slice(0, 8)}`
+              : encounterSummary?.patientFirstName || encounterSummary?.patientLastName
+                ? `${encounterSummary?.patientFirstName ?? ''} ${encounterSummary?.patientLastName ?? ''}`.trim()
+                : encounterSummary?.patientId
+                  ? `Encounter patient ${encounterSummary.patientId.slice(0, 8)}`
                 : 'Select a patient'}
           </h2>
-          <p className="text-xs text-muted-foreground">
-            {patient
-              ? `DOB: ${formatDob(patient.dateOfBirth)}${
-                  patient.clinicPatientId
-                    ? ` • Patient ID ${patient.clinicPatientId}`
-                    : patient.mrn
-                      ? ` • ${patient.mrn}`
-                      : ''
-                }`
-              : onOpenPatientPicker
-                ? 'Tap to open the patient list and attach this note.'
-                : 'Select a patient from the toolbar to attach this note.'}
-          </p>
+          {patient ? (
+            <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2">
+                <span>DOB: {formatDob(patient.dateOfBirth)}</span>
+                {formatAgeFromDob(patient.dateOfBirth) && (
+                  <>
+                    <span className="size-1 shrink-0 rounded-full bg-border" aria-hidden />
+                    <span>{formatAgeFromDob(patient.dateOfBirth)}</span>
+                  </>
+                )}
+                {patient.gender && (
+                  <>
+                    <span className="size-1 shrink-0 rounded-full bg-border" aria-hidden />
+                    <span>{patient.gender}</span>
+                  </>
+                )}
+              </div>
+              {(patient.clinicPatientId ?? patient.mrn) && (
+                <div>Patient ID: {patient.clinicPatientId ?? patient.mrn}</div>
+              )}
+            </div>
+          ) : (
+            <>
+              {(encounterSummary?.patientDateOfBirth || encounterSummary?.patientGender) && (
+                <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {encounterSummary?.patientDateOfBirth ? (
+                      <span>DOB: {formatDob(encounterSummary.patientDateOfBirth)}</span>
+                    ) : null}
+                    {encounterSummary?.patientDateOfBirth &&
+                    formatAgeFromDob(encounterSummary.patientDateOfBirth) ? (
+                      <>
+                        <span className="size-1 shrink-0 rounded-full bg-border" aria-hidden />
+                        <span>{formatAgeFromDob(encounterSummary.patientDateOfBirth)}</span>
+                      </>
+                    ) : null}
+                    {encounterSummary?.patientGender ? (
+                      <>
+                        <span className="size-1 shrink-0 rounded-full bg-border" aria-hidden />
+                        <span>{encounterSummary.patientGender}</span>
+                      </>
+                    ) : null}
+                  </div>
+                  {encounterSummary?.patientDisplayId ? (
+                    <div>Patient ID: {encounterSummary.patientDisplayId}</div>
+                  ) : null}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {onOpenPatientPicker
+                  ? 'Tap to open the patient list and attach this note.'
+                  : 'Select a patient from the toolbar to attach this note.'}
+              </p>
+            </>
+          )}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-        <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-        DONE
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <div className="flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+          <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          DONE
+        </div>
+        {emrSource ? <EncounterSourceBadge source={emrSource} /> : null}
       </div>
     </>
   )
@@ -813,13 +840,25 @@ export function SoapPage({
           animate="show"
         >
           <motion.section variants={soapPageItemVariants}>
-            {!patient && onOpenPatientPicker ? (
+            {(patient || encounterSummary?.patientId) && onOpenPatientDetail ? (
+              <button
+                type="button"
+                onClick={onOpenPatientDetail}
+                className={cn(
+                  patientHeaderShellClass,
+                  'cursor-pointer text-left transition-colors hover:bg-primary/30 hover:ring-primary/25',
+                )}
+                aria-label="Open patient details"
+              >
+                {patientHeaderBody}
+              </button>
+            ) : !patient && onOpenPatientPicker ? (
               <button
                 type="button"
                 onClick={onOpenPatientPicker}
                 className={cn(
                   patientHeaderShellClass,
-                  'cursor-pointer text-left transition-colors hover:bg-primary/25 hover:ring-primary/25',
+                  'cursor-pointer text-left transition-colors hover:bg-primary/30 hover:ring-primary/25',
                 )}
                 aria-label="Select a patient"
               >
@@ -922,51 +961,81 @@ export function SoapPage({
 
               <motion.div
                 variants={soapPageItemVariants}
-                className="mb-2 flex items-center gap-2 px-0.5"
+                className="mb-2 flex items-center justify-between gap-2 px-0.5"
               >
-                <Sparkles className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
-                <h3 className="text-base font-bold text-foreground">AI Suggested ICD</h3>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <h3 className="text-base font-bold text-foreground">AI Suggested ICD</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIcdSectionExpanded((v) => !v)}
+                  className="text-xs font-semibold text-primary underline-offset-2 hover:underline"
+                >
+                  {icdSectionExpanded ? 'Collapse Section' : 'Expand Section'}
+                </button>
               </motion.div>
-              {icdSuggestions.map((row) => (
-                <motion.div key={row.id} variants={soapPageItemVariants}>
-                  <ClinicalCodeCard
-                    borderAccentClass="border-l-violet-500"
-                    title={suggestionTitle(row)}
-                    status={row.status}
-                    code={row.code}
-                    codeFieldLabel="ICD code"
-                    description={row.description?.trim() || '-'}
-                    descriptionFieldLabel="ICD description"
-                    rationale={row.rationale?.trim() || '-'}
-                    confidence={row.confidence}
-                    onOpenDetail={() => setCodeDetail({ row })}
-                  />
-                </motion.div>
-              ))}
+              {icdSectionExpanded
+                ? icdSuggestions.map((row) => (
+                    <motion.div key={row.id} variants={soapPageItemVariants}>
+                      <ClinicalCodeCard
+                        borderAccentClass="border-l-violet-500"
+                        title={suggestionTitle(row)}
+                        status={row.status}
+                        code={row.code}
+                        codeFieldLabel="ICD code"
+                        description={row.description?.trim() || '-'}
+                        descriptionFieldLabel="ICD description"
+                        rationale={row.rationale?.trim() || '-'}
+                        confidence={row.confidence}
+                        expanded={icdExpanded[row.id] ?? true}
+                        onToggleExpand={() =>
+                          setIcdExpanded((prev) => ({ ...prev, [row.id]: !(prev[row.id] ?? true) }))
+                        }
+                        onOpenDetail={() => setCodeDetail({ row })}
+                      />
+                    </motion.div>
+                  ))
+                : null}
 
               <motion.div
                 variants={soapPageItemVariants}
-                className="mb-2 flex items-center gap-2 px-0.5"
+                className="mb-2 flex items-center justify-between gap-2 px-0.5"
               >
-                <Code2 className="size-5 shrink-0 text-teal-600 dark:text-teal-400" />
-                <h3 className="text-base font-bold text-foreground">AI Suggested CPT</h3>
+                <div className="flex items-center gap-2">
+                  <Code2 className="size-5 shrink-0 text-teal-600 dark:text-teal-400" />
+                  <h3 className="text-base font-bold text-foreground">AI Suggested CPT</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCptSectionExpanded((v) => !v)}
+                  className="text-xs font-semibold text-primary underline-offset-2 hover:underline"
+                >
+                  {cptSectionExpanded ? 'Collapse Section' : 'Expand Section'}
+                </button>
               </motion.div>
-              {cptSuggestions.map((row) => (
-                <motion.div key={row.id} variants={soapPageItemVariants}>
-                  <ClinicalCodeCard
-                    borderAccentClass="border-l-teal-500"
-                    title={suggestionTitle(row)}
-                    status={row.status}
-                    code={row.code}
-                    codeFieldLabel="CPT code"
-                    description={row.description?.trim() || '-'}
-                    descriptionFieldLabel="CPT description"
-                    rationale={row.rationale?.trim() || '-'}
-                    confidence={row.confidence}
-                    onOpenDetail={() => setCodeDetail({ row })}
-                  />
-                </motion.div>
-              ))}
+              {cptSectionExpanded
+                ? cptSuggestions.map((row) => (
+                    <motion.div key={row.id} variants={soapPageItemVariants}>
+                      <ClinicalCodeCard
+                        borderAccentClass="border-l-teal-500"
+                        title={suggestionTitle(row)}
+                        status={row.status}
+                        code={row.code}
+                        codeFieldLabel="CPT code"
+                        description={row.description?.trim() || '-'}
+                        descriptionFieldLabel="CPT description"
+                        rationale={row.rationale?.trim() || '-'}
+                        confidence={row.confidence}
+                        expanded={cptExpanded[row.id] ?? true}
+                        onToggleExpand={() =>
+                          setCptExpanded((prev) => ({ ...prev, [row.id]: !(prev[row.id] ?? true) }))
+                        }
+                        onOpenDetail={() => setCodeDetail({ row })}
+                      />
+                    </motion.div>
+                  ))
+                : null}
             </>
           )}
         </motion.div>

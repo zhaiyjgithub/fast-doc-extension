@@ -92,6 +92,72 @@ function parsePayload(body: unknown): ParseDemographicsResult {
   }
 }
 
+export type SearchPatientsOptions = {
+  q?: string
+  dob?: string
+  patientId?: string
+  clinicPatientId?: string
+  name?: string
+  mrn?: string
+  language?: string
+  page?: number
+  pageSize?: number
+}
+
+export type SearchPatientsResult = {
+  items: Patient[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export async function searchPatients(
+  accessToken: string,
+  options: SearchPatientsOptions = {},
+): Promise<SearchPatientsResult> {
+  const token = accessToken.trim()
+  if (!token) throw new PatientApiError('Missing access token.')
+
+  const params = new URLSearchParams()
+  if (options.q?.trim()) params.set('q', options.q.trim())
+  if (options.dob?.trim()) params.set('dob', options.dob.trim())
+  if (options.patientId?.trim()) params.set('patient_id', options.patientId.trim())
+  if (options.clinicPatientId?.trim()) params.set('clinic_patient_id', options.clinicPatientId.trim())
+  if (options.name?.trim()) params.set('name', options.name.trim())
+  if (options.mrn?.trim()) params.set('mrn', options.mrn.trim())
+  if (options.language?.trim()) params.set('language', options.language.trim())
+  params.set('page', String(options.page ?? 1))
+  params.set('page_size', String(options.pageSize ?? 20))
+
+  const response = await fetch(
+    `${fastdocApiBaseUrl()}/patients/search?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    },
+  ).catch(() => {
+    throw new PatientApiError('Unable to reach FastDoc patient API.')
+  })
+
+  const body = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail =
+      isPlainObject(body) && typeof body.detail === 'string'
+        ? body.detail
+        : null
+    throw new PatientApiError(detail ?? 'Failed to search patients.', response.status)
+  }
+
+  const data = isPlainObject(body) && isPlainObject(body.data) ? body.data : body
+  const rawItems = Array.isArray(data.items) ? data.items : []
+  return {
+    items: rawItems.map(parsePatient),
+    total: typeof data.total === 'number' ? data.total : rawItems.length,
+    page: typeof data.page === 'number' ? data.page : 1,
+    pageSize: typeof data.page_size === 'number' ? data.page_size : 20,
+  }
+}
+
 export async function parseDemographicsTextWithLlm(
   accessToken: string,
   demographicsText: string,
@@ -135,4 +201,36 @@ export async function parseDemographicsTextWithLlm(
     throw new PatientApiError(detail ?? 'Failed to parse demographics text.', response.status)
   }
   return parsePayload(body)
+}
+
+export async function getPatientById(accessToken: string, patientId: string): Promise<Patient> {
+  const token = accessToken.trim()
+  const id = patientId.trim()
+  if (!token) {
+    throw new PatientApiError('Missing access token.')
+  }
+  if (!id) {
+    throw new PatientApiError('Missing patient ID.')
+  }
+
+  const response = await fetch(`${fastdocApiBaseUrl()}/patients/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  }).catch(() => {
+    throw new PatientApiError('Unable to reach FastDoc patient API.')
+  })
+
+  const body = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail =
+      isPlainObject(body) && typeof body.detail === 'string'
+        ? body.detail
+        : isPlainObject(body) && isPlainObject(body.data) && typeof body.data.message === 'string'
+          ? body.data.message
+          : null
+    throw new PatientApiError(detail ?? 'Failed to load patient detail.', response.status)
+  }
+
+  const data = isPlainObject(body) && isPlainObject(body.data) ? body.data : body
+  return parsePatient(data)
 }
