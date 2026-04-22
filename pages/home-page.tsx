@@ -7,6 +7,7 @@ import { motion, type Variants } from 'motion/react'
 import { toast } from 'sonner'
 import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
 import type { EncounterSummary } from '@/lib/encounter-api'
+import type { WeeklyInsight } from '@/lib/analytics-api'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
 import { EncounterStatusBadge } from '@/components/encounter/encounter-status-badge'
@@ -50,6 +51,8 @@ interface HomePageProps {
   onOpenMatchPatientPicker?: () => void
   onNavigate: (page: 'recording' | 'soap') => void
   encounters: EncounterSummary[]
+  /** Undefined = loading; null = unavailable; otherwise server weekly insight. */
+  weeklyInsight?: WeeklyInsight | null | undefined
   onOpenEncounter: (encounterId: string) => void
   /** Opens patient demographics for an encounter (name row). */
   onOpenEncounterPatient?: (encounterId: string) => void
@@ -161,6 +164,57 @@ function encounterPatientIdLabel(encounter: EncounterSummary): string {
   return `Patient ID: ${shortPatientId(encounter.patientId)}`
 }
 
+function weeklyNotesHeadline(insight: WeeklyInsight | null | undefined): string {
+  if (insight === undefined) {
+    return 'Loading your weekly summary…'
+  }
+  if (insight === null) {
+    return 'Weekly stats unavailable for this account.'
+  }
+  const n = insight.notesCompletedThisWeek
+  const label = n === 1 ? 'note' : 'notes'
+  return `You've completed ${n} ${label} this week.`
+}
+
+function weeklyComparisonLine(insight: WeeklyInsight | null | undefined): string {
+  if (insight === undefined) {
+    return 'Fetching comparison with last week…'
+  }
+  if (insight === null) {
+    return 'Link a provider profile to see week-over-week trends.'
+  }
+  const {
+    completionTimeChangePercent,
+    paceDirection,
+    notesThroughputChangePercent,
+    notesCompletedLastWeek,
+  } = insight
+
+  if (paceDirection !== 'unknown' && completionTimeChangePercent !== null) {
+    if (paceDirection === 'same') {
+      return 'Same pace as last week'
+    }
+    const rounded = Math.round(completionTimeChangePercent)
+    const sign = rounded > 0 ? '+' : ''
+    if (paceDirection === 'faster') {
+      return `${sign}${rounded}% faster than last week`
+    }
+    return `${sign}${rounded}% slower than last week`
+  }
+
+  if (notesThroughputChangePercent !== null && notesCompletedLastWeek > 0) {
+    const rounded = Math.round(notesThroughputChangePercent)
+    const sign = rounded > 0 ? '+' : ''
+    return `${sign}${rounded}% vs last week by note count`
+  }
+
+  if (notesCompletedLastWeek === 0) {
+    return 'Not enough data from last week yet.'
+  }
+
+  return 'Same as last week'
+}
+
 function formatEncounterTime(timestamp: string): string {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) {
@@ -189,6 +243,7 @@ export function HomePage({
   onOpenMatchPatientPicker,
   onNavigate,
   encounters,
+  weeklyInsight,
   onOpenEncounter,
   onOpenEncounterPatient,
 }: HomePageProps) {
@@ -399,17 +454,47 @@ export function HomePage({
               <p className="mb-1 text-xs font-bold uppercase tracking-widest text-primary opacity-90">
                 Weekly insight
               </p>
-              <h3 className="mb-4 text-xl font-bold">
-                You&apos;ve completed 24 notes this week.
-              </h3>
+              <h3 className="mb-4 text-xl font-bold">{weeklyNotesHeadline(weeklyInsight)}</h3>
               <div className="flex items-center gap-4">
                 <div className="flex -space-x-2">
-                  <div className="size-8 rounded-full border-2 border-slate-900 bg-slate-500 dark:border-zinc-950" />
-                  <div className="size-8 rounded-full border-2 border-slate-900 bg-slate-600 dark:border-zinc-950" />
-                  <div className="size-8 rounded-full border-2 border-slate-900 bg-slate-700 dark:border-zinc-950" />
+                  {weeklyInsight &&
+                  weeklyInsight.recentCompletedPatients &&
+                  weeklyInsight.recentCompletedPatients.length > 0
+                    ? weeklyInsight.recentCompletedPatients.map((row) => (
+                        <button
+                          key={row.encounterId}
+                          type="button"
+                          onClick={() => onOpenEncounter(row.encounterId)}
+                          className="relative z-0 outline-none transition-transform hover:z-10 hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary"
+                          aria-label={`Open encounter ${row.initials}`}
+                        >
+                          <Avatar className="size-8 border-2 border-slate-900 dark:border-zinc-950">
+                            <AvatarFallback
+                              className={cn(
+                                'text-[10px] font-semibold',
+                                avatarFallbackClassForName(`${row.initials}-${row.encounterId}`),
+                              )}
+                            >
+                              {row.initials}
+                            </AvatarFallback>
+                          </Avatar>
+                        </button>
+                      ))
+                    : [0, 1, 2].map((i) => (
+                        <div
+                          key={i}
+                          className={cn(
+                            'size-8 rounded-full border-2 border-slate-900 dark:border-zinc-950',
+                            i === 0 && 'bg-slate-500',
+                            i === 1 && 'bg-slate-600',
+                            i === 2 && 'bg-slate-700',
+                          )}
+                          aria-hidden
+                        />
+                      ))}
                 </div>
                 <span className="text-xs font-medium text-slate-300">
-                  +12% faster than last week
+                  {weeklyComparisonLine(weeklyInsight)}
                 </span>
               </div>
             </div>

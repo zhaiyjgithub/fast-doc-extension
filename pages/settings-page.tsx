@@ -17,9 +17,26 @@ import {
   Package,
   Mail,
 } from 'lucide-react'
+import { toast } from 'sonner'
 
 const APP_VERSION = '1.0.0'
 const CONTACT_EMAIL = 'support@fastdoc.app'
+
+const PRIVACY_POLICY_URL =
+  'https://stump-faucet-5ea.notion.site/Privacy-Policy-34a8cc782fc280949590dbd0fbab12a0?pvs=73'
+const TERMS_OF_SERVICE_URL =
+  'https://stump-faucet-5ea.notion.site/Terms-of-Service-34a8cc782fc28028837dd57dfb6d5958?pvs=73'
+
+function openInNewBrowserTab(url: string) {
+  void browser.tabs.create({ url, active: true })
+}
+
+function copySupportEmail() {
+  void navigator.clipboard.writeText(CONTACT_EMAIL).then(
+    () => toast.success(`Copied ${CONTACT_EMAIL}`),
+    () => toast.error('Could not copy email'),
+  )
+}
 
 const settingsPageListVariants: Variants = {
   hidden: {},
@@ -60,6 +77,7 @@ function SettingsRow({ icon, label, description, children, onClick }: SettingsRo
   const Tag = onClick ? 'button' : 'div'
   return (
     <Tag
+      {...(onClick ? ({ type: 'button' } as const) : {})}
       className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-accent"
       onClick={onClick}
     >
@@ -147,14 +165,14 @@ export function SettingsPage({
             <SettingsRow
               icon={<Shield className="h-4 w-4" />}
               label="Privacy Policy"
-              onClick={() => {}}
+              onClick={() => openInNewBrowserTab(PRIVACY_POLICY_URL)}
             >
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </SettingsRow>
             <SettingsRow
               icon={<Shield className="h-4 w-4" />}
               label="Terms of Service"
-              onClick={() => {}}
+              onClick={() => openInNewBrowserTab(TERMS_OF_SERVICE_URL)}
             >
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </SettingsRow>
@@ -205,9 +223,7 @@ export function SettingsPage({
               icon={<Mail className="h-4 w-4" />}
               label="Support email"
               description={CONTACT_EMAIL}
-              onClick={() => {
-                window.location.href = `mailto:${CONTACT_EMAIL}`
-              }}
+              onClick={copySupportEmail}
             >
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </SettingsRow>

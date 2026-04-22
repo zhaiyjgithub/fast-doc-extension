@@ -42,6 +42,7 @@ import {
 import { getProviderProfile, providerDisplayName, type ProviderProfile } from '@/lib/mock-provider'
 import { getDemographicByEncounterId } from '@/lib/patient-demographic'
 import { PatientApiError, getPatientById, parseDemographicsTextWithLlm } from '@/lib/patient-api'
+import { AnalyticsApiError, getWeeklyInsight, type WeeklyInsight } from '@/lib/analytics-api'
 import { Home, FileText, Mic, Settings } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -188,6 +189,9 @@ export default function App() {
   const [activeEncounterDetail, setActiveEncounterDetail] = React.useState<EncounterSummary | null>(null)
   const [activeEncounterReport, setActiveEncounterReport] = React.useState<EncounterReport | null>(null)
   const [homeEncounters, setHomeEncounters] = React.useState<EncounterSummary[]>([])
+  const [homeWeeklyInsight, setHomeWeeklyInsight] = React.useState<WeeklyInsight | null | undefined>(
+    undefined,
+  )
   const [notesEncounters, setNotesEncounters] = React.useState<EncounterSummary[]>([])
   const [notesPage, setNotesPage] = React.useState(1)
   const [notesHasMore, setNotesHasMore] = React.useState(false)
@@ -222,6 +226,7 @@ export default function App() {
     setActiveEncounterDetail(null)
     setActiveEncounterReport(null)
     setHomeEncounters([])
+    setHomeWeeklyInsight(undefined)
     setNotesEncounters([])
     setNotesPage(1)
     setNotesHasMore(false)
@@ -305,6 +310,28 @@ export default function App() {
       }
     },
     [isLoggedIn, withAuthRetry],
+  )
+
+  const refreshWeeklyInsight = React.useCallback(
+    async (showToastOnError = true) => {
+      if (!accessToken || !isLoggedIn || !providerId) {
+        setHomeWeeklyInsight(undefined)
+        return
+      }
+
+      try {
+        const insight = await withAuthRetry((token) => getWeeklyInsight(token))
+        setHomeWeeklyInsight(insight)
+      } catch (error) {
+        setHomeWeeklyInsight(null)
+        if (showToastOnError && !(error instanceof AnalyticsApiError && error.status === 403)) {
+          const message =
+            error instanceof Error ? error.message : 'Unable to load weekly insight right now.'
+          toast.warning(message)
+        }
+      }
+    },
+    [accessToken, isLoggedIn, providerId, withAuthRetry],
   )
 
   const loadNotesEncountersPage = React.useCallback(
@@ -500,6 +527,7 @@ export default function App() {
           }
           setIsEmrGenerating(false)
           await refreshTodayEncounters(false)
+          await refreshWeeklyInsight(false)
           toast.success('SOAP note ready')
         } else if (poll.status === 'failed') {
           clearInterval(emrPollIntervalRef.current!)
@@ -561,6 +589,7 @@ export default function App() {
       patient,
       providerId,
       refreshTodayEncounters,
+      refreshWeeklyInsight,
       withAuthRetry,
     ],
   )
@@ -762,7 +791,8 @@ export default function App() {
       return
     }
     void refreshTodayEncounters(false)
-  }, [currentPage, refreshTodayEncounters])
+    void refreshWeeklyInsight(false)
+  }, [currentPage, refreshTodayEncounters, refreshWeeklyInsight])
 
   React.useEffect(() => {
     if (currentPage !== 'notes') {
@@ -849,6 +879,7 @@ export default function App() {
       setActiveEncounterDetail(null)
       setActiveEncounterReport(null)
       setHomeEncounters([])
+      setHomeWeeklyInsight(undefined)
       setNotesEncounters([])
       setNotesPage(1)
       setNotesHasMore(false)
@@ -1066,6 +1097,7 @@ export default function App() {
             onOpenMatchPatientPicker={() => openPatientSheet('match')}
             onNavigate={(page) => handleNavChange(page)}
             encounters={homeEncounters}
+            weeklyInsight={homeWeeklyInsight}
             onOpenEncounter={(encounterId) => void openEncounterInSoap(encounterId)}
           />
         )}
