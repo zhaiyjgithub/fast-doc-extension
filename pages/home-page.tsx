@@ -47,8 +47,11 @@ interface HomePageProps {
   onClearSelectedPatient: () => void
   /** Opens patient details from selected patient banner. */
   onOpenSelectedPatientDetail?: () => void
-  /** Opens patient sheet in match mode (same as Record tab match flow). */
-  onOpenMatchPatientPicker?: () => void
+  /**
+   * Same flow as Record: extract demographics from the focused EMR tab and match/create patient.
+   * Parent may navigate to recording after a successful match.
+   */
+  onTapMatchPatient?: () => void | Promise<void>
   onNavigate: (page: 'recording' | 'soap') => void
   encounters: EncounterSummary[]
   /** Undefined = loading; null = unavailable; otherwise server weekly insight. */
@@ -240,7 +243,7 @@ export function HomePage({
   onChangePatient,
   onClearSelectedPatient,
   onOpenSelectedPatientDetail,
-  onOpenMatchPatientPicker,
+  onTapMatchPatient,
   onNavigate,
   encounters,
   weeklyInsight,
@@ -363,7 +366,7 @@ export function HomePage({
 
               <button
                 type="button"
-                onClick={() => onOpenMatchPatientPicker?.()}
+                onClick={() => void onTapMatchPatient?.()}
                 className="flex min-h-[120px] flex-col justify-between rounded-lg border border-emerald-200/90 bg-emerald-50 p-3 text-left shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-100/90 active:scale-[0.99] dark:border-emerald-800/80 dark:bg-emerald-950/45 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/65 sm:min-h-[132px] sm:p-4"
               >
                 <div className="self-start rounded-full bg-emerald-100 p-1.5 dark:bg-emerald-900/55 sm:p-2">

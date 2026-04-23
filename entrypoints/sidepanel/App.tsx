@@ -913,10 +913,10 @@ export default function App() {
     }
   }
 
-  const handleTapMatchPatient = React.useCallback(async () => {
+  const handleTapMatchPatient = React.useCallback(async (): Promise<boolean> => {
     if (!accessToken) {
       toast.warning('Please sign in before matching a patient from EMR.')
-      return
+      return false
     }
 
     const requestId = `demographics-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -933,7 +933,7 @@ export default function App() {
           requestId,
         })
         toast.warning('Could not extract demographics from the active page')
-        return
+        return false
       }
 
       if (result?.ok) {
@@ -953,14 +953,14 @@ export default function App() {
         const text = demographics.demographicsText ?? ''
         if (!text.trim()) {
           toast.warning('Demographics text is empty in this EMR section')
-          return
+          return false
         }
         const clinicId = providerProfile?.clinicId?.trim()
         const divisionId = providerProfile?.divisionId?.trim()
         const clinicSystem = providerProfile?.clinicSystem?.trim()
         if (!clinicId || !divisionId || !clinicSystem) {
           toast.warning('Provider profile is missing clinic context (clinic/division/system).')
-          return
+          return false
         }
         const parsedResult = await withAuthRetry((token) =>
           parseDemographicsTextWithLlm(token, text, {
@@ -977,15 +977,18 @@ export default function App() {
         } else {
           toast.success(`Matched existing patient: ${name}`)
         }
+        return true
       } else {
         const errorMessage =
           typeof result?.error === 'string' ? result.error : 'Patient demographics section not found'
         toast.warning(errorMessage)
+        return false
       }
     } catch (error) {
       logEmrDebug('sidepanel', 'demographics extraction threw error', { requestId, error })
       const errorMessage = error instanceof Error ? error.message : 'Failed to extract demographics'
       toast.warning(errorMessage)
+      return false
     }
   }, [accessToken, providerProfile, withAuthRetry])
 
@@ -1098,7 +1101,12 @@ export default function App() {
             onChangePatient={() => openPatientSheet('select')}
             onClearSelectedPatient={() => setPatient(null)}
             onOpenSelectedPatientDetail={() => void openPatientDetails('home')}
-            onOpenMatchPatientPicker={() => openPatientSheet('match')}
+            onTapMatchPatient={async () => {
+              const ok = await handleTapMatchPatient()
+              if (ok) {
+                setCurrentPage('recording')
+              }
+            }}
             onNavigate={(page) => handleNavChange(page)}
             encounters={homeEncounters}
             weeklyInsight={homeWeeklyInsight}
