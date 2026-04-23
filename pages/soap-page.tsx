@@ -612,6 +612,8 @@ export function SoapPage({
   )
   const [bodies, setBodies] = React.useState<Record<SectionId, string>>(() => initialBodiesFromReport(encounterReport))
   const [isEditing, setIsEditing] = React.useState(false)
+  /** SOAP fields when Edit was tapped; used by Cancel to discard unsaved changes. */
+  const bodiesBeforeEditRef = React.useRef<Record<SectionId, string> | null>(null)
   const [codeDetail, setCodeDetail] = React.useState<ClinicalCodeDetail | null>(null)
   const [isSyncAnimating, setIsSyncAnimating] = React.useState(false)
   const [icdSectionExpanded, setIcdSectionExpanded] = React.useState(true)
@@ -712,6 +714,19 @@ export function SoapPage({
     }
   }
 
+  function startEditing() {
+    bodiesBeforeEditRef.current = { ...bodies }
+    setIsEditing(true)
+  }
+
+  function handleCancelEdit() {
+    if (bodiesBeforeEditRef.current) {
+      setBodies(bodiesBeforeEditRef.current)
+    }
+    bodiesBeforeEditRef.current = null
+    setIsEditing(false)
+  }
+
   function handleSave() {
     setBodies((b) => {
       const next = { ...b }
@@ -720,11 +735,12 @@ export function SoapPage({
       }
       return next
     })
+    bodiesBeforeEditRef.current = null
     setIsEditing(false)
   }
 
   const patientHeaderShellClass =
-    'relative flex w-full items-center justify-between gap-3 rounded-lg bg-primary/25 p-4 shadow-sm ring-1 ring-primary/20'
+    'relative flex w-full flex-col gap-3 rounded-lg bg-primary/25 p-4 shadow-sm ring-1 ring-primary/20'
 
   const patientHeaderBody = (
     <>
@@ -811,17 +827,12 @@ export function SoapPage({
                   ) : null}
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">
-                {onOpenPatientPicker
-                  ? 'Tap to open the patient list and attach this note.'
-                  : 'Select a patient from the toolbar to attach this note.'}
-              </p>
             </>
           )}
         </div>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
-        <div className="flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+      <div className="flex w-full flex-wrap items-center gap-2">
+        <div className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
           <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
           DONE
         </div>
@@ -1054,7 +1065,7 @@ export function SoapPage({
         <SoapFabMenu
           onCopy={handleCopy}
           onSync={handleSync}
-          onEdit={() => setIsEditing(true)}
+          onEdit={startEditing}
           onTranscript={onOpenTranscript}
         />
       ) : null}
@@ -1069,13 +1080,23 @@ export function SoapPage({
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="pointer-events-none fixed inset-x-0 bottom-14 z-40 bg-transparent px-4 py-3"
           >
-            <Button
-              type="button"
-              className="pointer-events-auto h-11 w-full text-base font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.18)] dark:shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
-              onClick={handleSave}
-            >
-              Save
-            </Button>
+            <div className="pointer-events-auto flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 flex-1 text-base font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.12)] dark:shadow-[0_4px_18px_rgba(0,0,0,0.35)]"
+                onClick={handleCancelEdit}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="h-11 flex-1 text-base font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.18)] dark:shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
+                onClick={handleSave}
+              >
+                Save
+              </Button>
+            </div>
           </motion.div>
         ) : null}
       </AnimatePresence>
