@@ -950,10 +950,10 @@ export function RecordingPage({
                   onChange={(e) => setTranscript(e.target.value)}
                   className="min-h-[200px] text-sm"
                 />
-                <div className="flex gap-2">
+                <div className="flex items-stretch gap-2">
                   <Button
                     variant="outline"
-                    className="flex-1"
+                    className="h-10 min-h-10 flex-1"
                     onClick={() => {
                       setShowManualInput(false)
                       setTranscript('')
@@ -963,7 +963,7 @@ export function RecordingPage({
                   </Button>
                   <Button
                     variant="outline"
-                    className="h-10 flex-1 border-yellow-500 bg-yellow-400 text-foreground hover:bg-yellow-500"
+                    className="h-10 min-h-10 flex-1 border-yellow-500 bg-yellow-400 text-foreground hover:bg-yellow-500"
                     onClick={() => {
                       if (!requirePatientOrMatch()) return
                       onGenerateEMR(transcript, elapsedTime, 'paste')
@@ -1195,7 +1195,7 @@ export function RecordingPage({
                       </p>
                     </div>
                     <Button
-                      className="h-12 w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                      className="h-12 min-h-12 w-full bg-primary text-primary-foreground hover:bg-primary/90"
                       onClick={() => onGenerateEMR(transcript, elapsedTime, 'voice')}
                       disabled={!transcript.trim()}
                     >
@@ -1205,7 +1205,7 @@ export function RecordingPage({
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-11 w-full"
+                      className="h-12 min-h-12 w-full"
                       onClick={handleCancelGenerateAndResume}
                       disabled={isConnectingDeepgram}
                     >
