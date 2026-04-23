@@ -1021,6 +1021,10 @@ export default function App() {
           ? result.error
           : 'Could not sync to EMR from this page'
       toast.warning(errorMessage)
+
+      if (typeof result?.error === 'string' && result.error.includes('browser/internal page')) {
+        return false
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to sync EMR chief complaint'
       toast.warning(errorMessage)

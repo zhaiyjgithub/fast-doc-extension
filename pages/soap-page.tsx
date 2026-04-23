@@ -55,7 +55,7 @@ interface SoapPageProps {
     chiefComplaintText: string
     presentIllnessText: string
     autoSave?: boolean
-  }) => Promise<void> | void
+  }) => Promise<boolean | void> | boolean | void
 }
 
 type SectionId = 'subjective' | 'objective' | 'assessment' | 'plan'
@@ -662,7 +662,24 @@ export function SoapPage({
   }
 
   function buildNoteText() {
-    return SECTIONS.map((s) => `${s.label}\n${bodies[s.id]}`).join('\n\n')
+    const soapText = SECTIONS.map((s) => `${s.label}\n${bodies[s.id]}`).join('\n\n')
+
+    const formatCodeList = (suggestions: ReportCodeSuggestion[]) =>
+      suggestions.length
+        ? suggestions
+            .map((row) => {
+              const desc = row.description || row.condition
+              return desc ? `${row.code} - ${desc}` : row.code
+            })
+            .join('\n')
+        : 'None'
+
+    const icdText =
+      icdSuggestions.length > 0 ? `ICD\n${formatCodeList(icdSuggestions)}` : null
+    const cptText =
+      cptSuggestions.length > 0 ? `CPT\n${formatCodeList(cptSuggestions)}` : null
+
+    return [soapText, icdText, cptText].filter(Boolean).join('\n\n')
   }
 
   function handleCopy() {
@@ -699,16 +716,22 @@ export function SoapPage({
     const minVisualMs = 5000
     const startedAt = Date.now()
     setIsSyncAnimating(true)
+    let skipAnimation = false
     try {
       if (!onSyncToEmr) {
         toast.success('Sync (demo) — note would be sent to your EHR.')
         return
       }
-      await onSyncToEmr(buildChiefComplaintSyncPayload())
+      const result = await onSyncToEmr(buildChiefComplaintSyncPayload())
+      if (result === false) {
+        skipAnimation = true
+      }
     } finally {
-      const elapsed = Date.now() - startedAt
-      if (elapsed < minVisualMs) {
-        await new Promise((resolve) => setTimeout(resolve, minVisualMs - elapsed))
+      if (!skipAnimation) {
+        const elapsed = Date.now() - startedAt
+        if (elapsed < minVisualMs) {
+          await new Promise((resolve) => setTimeout(resolve, minVisualMs - elapsed))
+        }
       }
       setIsSyncAnimating(false)
     }
