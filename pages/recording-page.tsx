@@ -3,6 +3,10 @@ import { differenceInYears, format, parseISO, isValid } from 'date-fns'
 import { useDeepgramSTT } from '@/hooks/use-deepgram-stt'
 import { getDeepgramTemporaryToken } from '@/lib/deepgram-temporary-token'
 import { deepgramApiKey } from '@/lib/env'
+import {
+  DEFAULT_DEEPGRAM_STT_LANGUAGE,
+  DEEPGRAM_NOVA3_STT_LANGUAGES,
+} from '@/lib/deepgram-nova3-stt-languages'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -16,6 +20,13 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Loader2, Mic, Pause, Sparkles, Square, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { cn } from '@/lib/utils'
@@ -246,6 +257,8 @@ export function RecordingPage({
   onOpenPatientDetail,
 }: RecordingPageProps) {
   const [state, setState] = React.useState<RecordingState>('ready')
+  /** Deepgram `nova-3` STT language (BCP-47); applied on next recording session. */
+  const [sttLanguage, setSttLanguage] = React.useState(DEFAULT_DEEPGRAM_STT_LANGUAGE)
   const [isConnectingDeepgram, setIsConnectingDeepgram] = React.useState(false)
   const [elapsedTime, setElapsedTime] = React.useState(0)
   const [transcript, setTranscript] = React.useState(
@@ -316,7 +329,7 @@ export function RecordingPage({
   const deepgram = useDeepgramSTT({
     apiKey: DEEPGRAM_API_KEY,
     getAccessToken: fetchDeepgramAccessToken,
-    language: 'en-US',
+    language: sttLanguage,
     onFinalSegment: handleFinalSegment,
   })
 
@@ -875,6 +888,23 @@ export function RecordingPage({
                     </button>
                   </div>
                 )}
+                <div className="w-full max-w-sm space-y-2">
+                  <label htmlFor="deepgram-stt-language" className="text-xs font-semibold text-muted-foreground">
+                    Transcription language
+                  </label>
+                  <Select value={sttLanguage} onValueChange={setSttLanguage}>
+                    <SelectTrigger id="deepgram-stt-language" className="w-full bg-card text-left">
+                      <SelectValue placeholder="Language" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[min(320px,50vh)]">
+                      {DEEPGRAM_NOVA3_STT_LANGUAGES.map((opt) => (
+                        <SelectItem key={opt.code} value={opt.code}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="relative">
                   <motion.div
                     className="absolute inset-0 rounded-full bg-primary/20"

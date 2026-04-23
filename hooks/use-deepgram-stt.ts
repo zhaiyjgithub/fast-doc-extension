@@ -50,7 +50,7 @@ export interface UseDeepgramSTTOptions {
   apiKey: string
   /** Optional async token provider used instead of the static API key. */
   getAccessToken?: () => Promise<string>
-  /** BCP-47 language code. Default: 'en-US' */
+  /** BCP-47 language code for Deepgram `language` (default: `en`, per Deepgram docs). */
   language?: string
   /** Called for each finalized speech segment with its speaker label. */
   onFinalSegment: (text: string, speaker: 'Doctor' | 'Patient') => void
@@ -130,7 +130,7 @@ const STOP_FINALIZE_TAIL_GRACE_MS = 250
 export function useDeepgramSTT({
   apiKey,
   getAccessToken,
-  language = 'en-US',
+  language = 'en',
   onFinalSegment,
   onInterimUpdate,
 }: UseDeepgramSTTOptions): UseDeepgramSTTReturn {
