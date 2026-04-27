@@ -6,6 +6,8 @@ export type GenerateEmrPayload = {
   patientId: string
   providerId?: string | null
   transcript: string
+  /** Optional provider notes (not the transcript); sent as provider_context. */
+  providerContext?: string | null
   requestId?: string | null
   conversationDurationSeconds?: number | null
   source?: 'voice' | 'paste' | null
@@ -267,6 +269,7 @@ export async function generateEmr(
         patient_id: patientId,
         provider_id: payload.providerId?.trim() || undefined,
         transcript,
+        provider_context: payload.providerContext?.trim() || undefined,
         request_id: payload.requestId?.trim() || undefined,
         conversation_duration_seconds: payload.conversationDurationSeconds ?? undefined,
         source: payload.source ?? undefined,

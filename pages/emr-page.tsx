@@ -5,7 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Wand2, Copy, Check } from 'lucide-react'
+import { Wand2, Copy, Check, Pencil, Eye } from 'lucide-react'
 
 interface EMRField {
   key: string
@@ -91,8 +91,14 @@ export function EMRPage({ patientId: _patientId }: EMRPageProps) {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col">
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
           <TabsList>
-            <TabsTrigger value="edit">Edit</TabsTrigger>
-            <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="edit" className="gap-1.5">
+              <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Edit
+            </TabsTrigger>
+            <TabsTrigger value="preview" className="gap-1.5">
+              <Eye className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Preview
+            </TabsTrigger>
           </TabsList>
           <Button
             size="sm"

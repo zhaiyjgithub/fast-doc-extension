@@ -434,6 +434,7 @@ export default function App() {
       transcript: string,
       conversationDurationSeconds?: number,
       source: 'voice' | 'paste' = 'voice',
+      providerContext?: string,
     ) => {
       if (!isLoggedIn || !accessToken) {
         toast.warning('Please sign in before generating EMR.')
@@ -453,6 +454,7 @@ export default function App() {
         toast.warning('Transcript is empty. Please record or paste consultation text first.')
         return
       }
+      const trimmedProviderContext = (providerContext ?? '').trim() || undefined
 
       // Phase 1: find or create encounter — stay on recording page so errors are shown here
       let encounter: EncounterSummary | null = null
@@ -490,6 +492,7 @@ export default function App() {
             patientId: patient.id,
             providerId,
             transcript: trimmedTranscript,
+            providerContext: trimmedProviderContext,
             conversationDurationSeconds,
             source,
           }),

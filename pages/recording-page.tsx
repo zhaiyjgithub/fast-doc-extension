@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Select,
@@ -27,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Loader2, Mic, Pause, Sparkles, Square, X } from 'lucide-react'
+import { Loader2, Mic, NotebookPen, Pause, ScrollText, Sparkles, Square, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { cn } from '@/lib/utils'
 import type { Patient } from '@/components/patient/patient-search-sheet'
@@ -165,6 +166,7 @@ interface RecordingPageProps {
     transcript: string,
     conversationDurationSeconds?: number,
     source?: 'voice' | 'paste',
+    providerContext?: string,
   ) => void
   /** Opens patient search sheet (e.g. from empty-state CTA or Search). */
   onOpenPatientPicker?: () => void
@@ -174,6 +176,54 @@ interface RecordingPageProps {
   onDismissActivePatient?: () => void
   /** Opens patient details page from the active patient card. */
   onOpenPatientDetail?: () => void
+}
+
+function EmrContextTranscriptTabs({
+  transcript,
+  onTranscriptChange,
+  emrContext,
+  onEmrContextChange,
+  transcriptId,
+  transcriptPlaceholder,
+}: {
+  transcript: string
+  onTranscriptChange: (value: string) => void
+  emrContext: string
+  onEmrContextChange: (value: string) => void
+  transcriptId?: string
+  transcriptPlaceholder: string
+}) {
+  return (
+    <Tabs defaultValue="transcript" className="w-full">
+      <TabsList className="grid w-full grid-cols-2 items-center gap-1.5 p-1.5">
+        <TabsTrigger value="context" className="w-full">
+          <NotebookPen className="size-4 shrink-0" aria-hidden />
+          Context
+        </TabsTrigger>
+        <TabsTrigger value="transcript" className="w-full">
+          <ScrollText className="size-4 shrink-0" aria-hidden />
+          Transcript
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="context" className="mt-3.5">
+        <Textarea
+          placeholder="Optional: facts not in the transcript (e.g. after-visit additions). Used for patient/guideline search and the clinical note."
+          value={emrContext}
+          onChange={(e) => onEmrContextChange(e.target.value)}
+          className="min-h-[200px] text-sm"
+        />
+      </TabsContent>
+      <TabsContent value="transcript" className="mt-3.5">
+        <Textarea
+          id={transcriptId}
+          placeholder={transcriptPlaceholder}
+          value={transcript}
+          onChange={(e) => onTranscriptChange(e.target.value)}
+          className="min-h-[200px] text-sm"
+        />
+      </TabsContent>
+    </Tabs>
+  )
 }
 
 function formatTime(seconds: number) {
@@ -281,6 +331,7 @@ export function RecordingPage({
   )
   const [liveLines, setLiveLines] = React.useState<LiveLine[]>([])
   const [showManualInput, setShowManualInput] = React.useState(false)
+  const [emrContext, setEmrContext] = React.useState('')
   const [compactRecordingHeader, setCompactRecordingHeader] = React.useState(false)
   const [dismissPatientWarningOpen, setDismissPatientWarningOpen] = React.useState(false)
   const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
@@ -354,6 +405,7 @@ export function RecordingPage({
         setMicPermission('granted')
         setElapsedTime(0)
         setTranscript('')
+        setEmrContext('')
         setLiveLines([])
         prevLiveLineCountRef.current = 0
         setState('recording')
@@ -628,6 +680,7 @@ export function RecordingPage({
     setState('ready')
     setElapsedTime(0)
     setTranscript('')
+    setEmrContext('')
     setLiveLines([])
     setShowManualInput(false)
     setCompactRecordingHeader(false)
@@ -944,11 +997,12 @@ export function RecordingPage({
                 exit={{ opacity: 0, y: -20 }}
                 className="space-y-4"
               >
-                <Textarea
-                  placeholder="Paste or type the consultation transcript here..."
-                  value={transcript}
-                  onChange={(e) => setTranscript(e.target.value)}
-                  className="min-h-[200px] text-sm"
+                <EmrContextTranscriptTabs
+                  transcript={transcript}
+                  onTranscriptChange={setTranscript}
+                  emrContext={emrContext}
+                  onEmrContextChange={setEmrContext}
+                  transcriptPlaceholder="Paste or type the consultation transcript here..."
                 />
                 <div className="flex items-stretch gap-2">
                   <Button
@@ -957,6 +1011,7 @@ export function RecordingPage({
                     onClick={() => {
                       setShowManualInput(false)
                       setTranscript('')
+                      setEmrContext('')
                     }}
                   >
                     Cancel
@@ -966,7 +1021,7 @@ export function RecordingPage({
                     className="h-10 min-h-10 flex-1 border-yellow-500 bg-yellow-400 text-foreground hover:bg-yellow-500"
                     onClick={() => {
                       if (!requirePatientOrMatch()) return
-                      onGenerateEMR(transcript, elapsedTime, 'paste')
+                      onGenerateEMR(transcript, elapsedTime, 'paste', emrContext.trim() || undefined)
                     }}
                     disabled={!transcript.trim()}
                   >
@@ -1181,22 +1236,23 @@ export function RecordingPage({
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground" htmlFor="review-transcript">
-                        Transcript
-                      </label>
-                      <Textarea
-                        id="review-transcript"
-                        value={transcript}
-                        onChange={(e) => setTranscript(e.target.value)}
-                        className="min-h-[200px] text-sm"
+                      <EmrContextTranscriptTabs
+                        transcript={transcript}
+                        onTranscriptChange={setTranscript}
+                        emrContext={emrContext}
+                        onEmrContextChange={setEmrContext}
+                        transcriptId="review-transcript"
+                        transcriptPlaceholder="Consultation transcript (edit if needed)"
                       />
                       <p className="text-xs text-muted-foreground">
-                        Review and edit before generating the EMR
+                        Review transcript and optional context before generating the EMR
                       </p>
                     </div>
                     <Button
                       className="h-12 min-h-12 w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                      onClick={() => onGenerateEMR(transcript, elapsedTime, 'voice')}
+                      onClick={() =>
+                        onGenerateEMR(transcript, elapsedTime, 'voice', emrContext.trim() || undefined)
+                      }
                       disabled={!transcript.trim()}
                     >
                       <Sparkles className="mr-2 size-4" />
