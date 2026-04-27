@@ -10,7 +10,8 @@ export type GenerateEmrPayload = {
   providerContext?: string | null
   requestId?: string | null
   conversationDurationSeconds?: number | null
-  source?: 'voice' | 'paste' | null
+  /** Recording vs manual (typed/pasted) transcript; API may still accept legacy `paste`. */
+  source?: 'voice' | 'manual' | null
 }
 
 export type EmrCodeSuggestion = {

@@ -32,6 +32,8 @@ export type EmrSummary = {
   requestId: string | null
   conversationDurationSeconds: number | null
   source: string | null
+  /** ISO 8601; last update time of the EMR note row (initially matches generation). */
+  updatedAt: string | null
 }
 
 export type EncounterReport = {
@@ -227,6 +229,7 @@ function parseEmrSummary(payload: unknown): EmrSummary {
   const duration = asOptionalNumber(payload.conversation_duration_seconds)
   const source = asOptionalString(payload.source)
   const isFinal = typeof payload.is_final === 'boolean' ? payload.is_final : undefined
+  const updatedAt = asOptionalString(payload.updated_at) ?? null
 
   if (
     !noteId ||
@@ -247,6 +250,7 @@ function parseEmrSummary(payload: unknown): EmrSummary {
     requestId,
     conversationDurationSeconds: duration,
     source,
+    updatedAt,
   }
 }
 

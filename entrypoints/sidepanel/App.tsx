@@ -433,7 +433,7 @@ export default function App() {
     async (
       transcript: string,
       conversationDurationSeconds?: number,
-      source: 'voice' | 'paste' = 'voice',
+      source: 'voice' | 'manual' = 'voice',
       providerContext?: string,
     ) => {
       if (!isLoggedIn || !accessToken) {

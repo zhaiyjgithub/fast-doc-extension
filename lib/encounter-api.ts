@@ -17,6 +17,8 @@ export type EncounterSummary = {
   transcriptText: string | null
   latestEmr: Record<string, unknown> | null
   emrSource: string | null
+  /** ISO 8601 from `emr_updated_at`; null if no EMR note. */
+  emrUpdatedAt: string | null
 }
 
 export type CreateEncounterPayload = {
@@ -178,6 +180,7 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
   const transcriptText = asOptionalNullableString(payload.transcript_text)
   const latestEmr = asOptionalRecord(payload.latest_emr)
   const emrSource = asOptionalNullableString(payload.emr_source)
+  const emrUpdatedAt = asOptionalNullableString(payload.emr_updated_at) ?? null
   const hasTranscript = typeof payload.has_transcript === 'boolean' ? payload.has_transcript : undefined
 
   if (
@@ -218,6 +221,7 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
     transcriptText,
     latestEmr,
     emrSource,
+    emrUpdatedAt,
   }
 }
 

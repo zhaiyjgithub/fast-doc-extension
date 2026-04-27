@@ -165,7 +165,7 @@ interface RecordingPageProps {
   onGenerateEMR: (
     transcript: string,
     conversationDurationSeconds?: number,
-    source?: 'voice' | 'paste',
+    source?: 'voice' | 'manual',
     providerContext?: string,
   ) => void
   /** Opens patient search sheet (e.g. from empty-state CTA or Search). */
@@ -1021,7 +1021,7 @@ export function RecordingPage({
                     className="h-10 min-h-10 flex-1 border-yellow-500 bg-yellow-400 text-foreground hover:bg-yellow-500"
                     onClick={() => {
                       if (!requirePatientOrMatch()) return
-                      onGenerateEMR(transcript, elapsedTime, 'paste', emrContext.trim() || undefined)
+                      onGenerateEMR(transcript, elapsedTime, 'manual', emrContext.trim() || undefined)
                     }}
                     disabled={!transcript.trim()}
                   >
