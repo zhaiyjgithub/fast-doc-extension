@@ -15,7 +15,7 @@ If you are using FastDoc on behalf of a clinic, practice, or other organization,
 
 - **Account and profile information**, such as name, email address, professional role or specialty, clinic or organization name, and credentials used to sign in.
 - **Clinical workflow content you choose to submit**, which may include patient demographics or identifiers you enter, encounter metadata, transcripts, recordings, notes, and other documentation you generate or upload through the Services.
-- **Support communications**, such as messages you send to us (for example, via `support@fastdoc.app`).
+- **Support communications**, such as messages you send to us (for example, via `support@fastdoc.cc`).
 
 ### 1.2 Information collected automatically
 
@@ -108,7 +108,7 @@ We may update this Privacy Policy from time to time. We will post the updated po
 
 ## 11. Contact
 
-**Email:** support@fastdoc.app
+**Email:** support@fastdoc.cc
 
 ---
 

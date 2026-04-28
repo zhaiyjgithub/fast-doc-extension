@@ -40,6 +40,9 @@ export function getProviderProfile(username: string): ProviderProfile {
     credentials: 'MD',
     specialty: 'Primary care',
     email,
+    clinicId: 'demo-clinic',
+    divisionId: 'demo-division',
+    clinicSystem: 'iclinic',
     clinicName: 'Riverside Family Medicine',
     siteLabel: 'iClinic',
   }

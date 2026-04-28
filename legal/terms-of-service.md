@@ -142,7 +142,7 @@ Unless otherwise required by applicable law, these Terms are governed by the law
 
 ## 16. Contact
 
-**Email:** support@fastdoc.app
+**Email:** support@fastdoc.cc
 
 ---
 

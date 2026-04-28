@@ -20,7 +20,7 @@ import {
 import { toast } from 'sonner'
 
 const APP_VERSION = '1.0.0'
-const CONTACT_EMAIL = 'support@fastdoc.app'
+const CONTACT_EMAIL = 'support@fastdoc.cc'
 
 const PRIVACY_POLICY_URL =
   'https://stump-faucet-5ea.notion.site/Privacy-Policy-34a8cc782fc280949590dbd0fbab12a0?pvs=73'

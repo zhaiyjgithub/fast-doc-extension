@@ -92,6 +92,79 @@ function parsePayload(body: unknown): ParseDemographicsResult {
   }
 }
 
+export type CreatePatientPayload = {
+  first_name: string
+  last_name: string
+  date_of_birth: string
+  gender: 'Male' | 'Female' | 'Other'
+  clinic_patient_id?: string
+  /** Used with DOB for duplicate detection; optional. */
+  email?: string
+  phone?: string
+}
+
+export async function createPatient(
+  accessToken: string,
+  payload: CreatePatientPayload,
+): Promise<Patient> {
+  const token = accessToken.trim()
+  if (!token) throw new PatientApiError('Missing access token.')
+
+  const firstName = payload.first_name.trim()
+  const lastName = payload.last_name.trim()
+  const dob = payload.date_of_birth.trim()
+  if (!firstName || !lastName || !dob) {
+    throw new PatientApiError('First name, last name, and date of birth are required.')
+  }
+
+  const body: Record<string, unknown> = {
+    first_name: firstName,
+    last_name: lastName,
+    date_of_birth: dob,
+    gender: payload.gender,
+  }
+  const clinicPatientId = payload.clinic_patient_id?.trim()
+  if (clinicPatientId) {
+    body.clinic_patient_id = clinicPatientId
+  }
+  const email = payload.email?.trim()
+  const phone = payload.phone?.trim()
+  if (email || phone) {
+    body.demographics = {
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+    }
+  }
+
+  const response = await fetch(`${fastdocApiBaseUrl()}/patients`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    cache: 'no-store',
+    body: JSON.stringify(body),
+  }).catch(() => {
+    throw new PatientApiError('Unable to reach FastDoc patient API.')
+  })
+
+  const resBody = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail =
+      isPlainObject(resBody) && typeof resBody.detail === 'string'
+        ? resBody.detail
+        : isPlainObject(resBody) && isPlainObject(resBody.data) && typeof resBody.data.message === 'string'
+          ? resBody.data.message
+          : null
+    throw new PatientApiError(detail ?? 'Failed to create patient.', response.status)
+  }
+
+  if (!isPlainObject(resBody) || !isPlainObject(resBody.data)) {
+    throw new PatientApiError('Unexpected response format from create patient API.')
+  }
+  return parsePatient(resBody.data)
+}
+
 export type SearchPatientsOptions = {
   q?: string
   dob?: string

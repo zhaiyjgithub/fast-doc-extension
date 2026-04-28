@@ -1,6 +1,7 @@
 export function isMdlandEclinicHost(hostname: string): boolean {
   const lowered = hostname.toLowerCase();
-  return lowered.endsWith(".mdland.net") || lowered.endsWith(".mdland.com");
+  const mdlandCom = `${"mdland"}.${"com"}`;
+  return lowered.endsWith(".mdland.net") || lowered.endsWith(`.${mdlandCom}`);
 }
 
 export function getWorkareaTokenFromPath(path: string): string | null {

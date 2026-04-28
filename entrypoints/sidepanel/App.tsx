@@ -12,6 +12,7 @@ import { SoapPage } from '@/pages/soap-page'
 import { TranscriptPage } from '@/pages/transcript-page'
 import { PatientDemographicPage } from '@/pages/patient-demographic-page'
 import { PatientDetailsPage } from '@/pages/patient-details-page'
+import { CreatePatientPage } from '@/pages/create-patient-page'
 import { ProviderPage } from '@/pages/provider-page'
 import { SettingsPage } from '@/pages/settings-page'
 import {
@@ -41,9 +42,26 @@ import {
 } from '@/lib/provider-session'
 import { getProviderProfile, providerDisplayName, type ProviderProfile } from '@/lib/mock-provider'
 import { getDemographicByEncounterId } from '@/lib/patient-demographic'
-import { PatientApiError, getPatientById, parseDemographicsTextWithLlm } from '@/lib/patient-api'
+import {
+  PatientApiError,
+  createPatient,
+  getPatientById,
+  parseDemographicsTextWithLlm,
+  type CreatePatientPayload,
+} from '@/lib/patient-api'
 import { AnalyticsApiError, getWeeklyInsight, type WeeklyInsight } from '@/lib/analytics-api'
-import { Home, FileText, Mic, Settings } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { FASTDOC_SUPPORT_EMAIL, providerClinicSystemIsIclinic } from '@/lib/iclinic-emr'
+import { Home, FileText, Mic, Settings, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 
 type AppPage =
@@ -56,6 +74,7 @@ type AppPage =
   | 'patient-details'
   | 'patient-demographic'
   | 'provider'
+  | 'create-patient'
 type SoapFlowPhase = 'idle'
 type ExtractEmrDemographicsResponse = {
   ok?: boolean
@@ -198,6 +217,9 @@ export default function App() {
   const [notesSearchQuery, setNotesSearchQuery] = React.useState('')
   const [notesDebouncedQuery, setNotesDebouncedQuery] = React.useState('')
   const [transcriptReturnPage, setTranscriptReturnPage] = React.useState<AppPage>('soap')
+  const [createPatientReturnPage, setCreatePatientReturnPage] = React.useState<'recording'>('recording')
+  const [isCreatingPatient, setIsCreatingPatient] = React.useState(false)
+  const [emrBridgeGuard, setEmrBridgeGuard] = React.useState<'match' | 'sync' | null>(null)
   const [isEmrGenerating, setIsEmrGenerating] = React.useState(false)
   const emrPollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -232,6 +254,7 @@ export default function App() {
     setNotesHasMore(false)
     setNotesSearchQuery('')
     setNotesDebouncedQuery('')
+    setIsCreatingPatient(false)
     setCurrentPage('home')
     toast.warning('Session expired. Please sign in again.')
   }, [])
@@ -657,6 +680,33 @@ export default function App() {
     setCurrentPage(patientDetailsReturnPage)
   }, [patientDetailsReturnPage])
 
+  function openCreatePatient(from: 'recording') {
+    setCreatePatientReturnPage(from)
+    setCurrentPage('create-patient')
+  }
+
+  const closeCreatePatient = React.useCallback(() => {
+    setCurrentPage(createPatientReturnPage)
+  }, [createPatientReturnPage])
+
+  const handleCreatePatient = React.useCallback(
+    async (payload: CreatePatientPayload) => {
+      setIsCreatingPatient(true)
+      try {
+        const created = await withAuthRetry((token) => createPatient(token, payload))
+        setPatient(created)
+        setCurrentPage(createPatientReturnPage)
+        toast.success(`Patient created: ${patientDisplayName(created)}`)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to create patient.'
+        toast.warning(message)
+      } finally {
+        setIsCreatingPatient(false)
+      }
+    },
+    [createPatientReturnPage, withAuthRetry],
+  )
+
   // Sync dark mode class on <html>
   React.useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
@@ -888,6 +938,7 @@ export default function App() {
       setNotesHasMore(false)
       setNotesSearchQuery('')
       setNotesDebouncedQuery('')
+      setIsCreatingPatient(false)
       setCurrentPage('home')
       toast.info('Signed out')
     }
@@ -919,6 +970,10 @@ export default function App() {
   const handleTapMatchPatient = React.useCallback(async (): Promise<boolean> => {
     if (!accessToken) {
       toast.warning('Please sign in before matching a patient from EMR.')
+      return false
+    }
+    if (!providerClinicSystemIsIclinic(providerProfile?.clinicSystem)) {
+      setEmrBridgeGuard('match')
       return false
     }
 
@@ -996,6 +1051,10 @@ export default function App() {
   }, [accessToken, providerProfile, withAuthRetry])
 
   const handleSyncSoapToEmr = React.useCallback(async (payload: SyncChiefComplaintPayload) => {
+    if (!providerClinicSystemIsIclinic(providerProfile?.clinicSystem)) {
+      setEmrBridgeGuard('sync')
+      return
+    }
     const requestId = `sync-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     try {
       logEmrDebug('sidepanel', 'start sync chief complaint', {
@@ -1035,7 +1094,7 @@ export default function App() {
       const errorMessage = error instanceof Error ? error.message : 'Failed to sync EMR chief complaint'
       toast.warning(errorMessage)
     }
-  }, [])
+  }, [providerProfile?.clinicSystem])
 
   const PAGE_TITLES: Record<AppPage, string> = {
     home: 'FastDoc',
@@ -1047,6 +1106,7 @@ export default function App() {
     'patient-details': 'Patient details',
     'patient-demographic': 'Patient demographics',
     provider: 'Provider',
+    'create-patient': 'New patient',
   }
 
   const patientDemographicPayload =
@@ -1078,16 +1138,32 @@ export default function App() {
       {currentPage !== 'home' && (
         <TopBar
           title={PAGE_TITLES[currentPage]}
+          action={
+            currentPage === 'recording' ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 px-2.5 text-xs font-medium"
+                onClick={() => openCreatePatient('recording')}
+              >
+                <UserPlus className="size-4 shrink-0" aria-hidden />
+                New patient
+              </Button>
+            ) : undefined
+          }
           onBack={
-            currentPage === 'patient-demographic'
-              ? closePatientDemographic
-              : currentPage === 'patient-details'
-                ? closePatientDetails
-              : currentPage === 'transcript'
-                ? () => setCurrentPage(transcriptReturnPage)
-              : currentPage === 'provider'
-                ? closeProviderPage
-                : undefined
+            currentPage === 'create-patient'
+              ? closeCreatePatient
+              : currentPage === 'patient-demographic'
+                ? closePatientDemographic
+                : currentPage === 'patient-details'
+                  ? closePatientDetails
+                  : currentPage === 'transcript'
+                    ? () => setCurrentPage(transcriptReturnPage)
+                    : currentPage === 'provider'
+                      ? closeProviderPage
+                      : undefined
           }
         />
       )}
@@ -1184,22 +1260,31 @@ export default function App() {
         {currentPage === 'patient-demographic' && patientDemographicPayload && (
           <PatientDemographicPage demographic={patientDemographicPayload} />
         )}
+        {currentPage === 'create-patient' && (
+          <CreatePatientPage
+            onCancel={closeCreatePatient}
+            onSave={(payload) => void handleCreatePatient(payload)}
+            isSaving={isCreatingPatient}
+          />
+        )}
       </div>
 
       <BottomNav
         tabs={NAV_TABS}
         value={
-          currentPage === 'patient-demographic'
-            ? patientDemoReturnTab
-            : currentPage === 'patient-details'
-              ? patientDetailsReturnPage === 'home'
-                ? 'home'
-                : patientDetailsReturnPage === 'recording'
-                ? 'recording'
-                : 'notes'
-            : currentPage === 'provider'
-              ? 'settings'
-              : currentPage
+          currentPage === 'create-patient'
+            ? 'recording'
+            : currentPage === 'patient-demographic'
+              ? patientDemoReturnTab
+              : currentPage === 'patient-details'
+                ? patientDetailsReturnPage === 'home'
+                  ? 'home'
+                  : patientDetailsReturnPage === 'recording'
+                    ? 'recording'
+                    : 'notes'
+                : currentPage === 'provider'
+                  ? 'settings'
+                  : currentPage
         }
         onChange={(id) => handleNavChange(id as AppPage)}
       />
@@ -1213,6 +1298,32 @@ export default function App() {
         onSelect={handleSelectPatient}
         accessToken={accessToken}
       />
+
+      <AlertDialog open={emrBridgeGuard !== null} onOpenChange={(open) => !open && setEmrBridgeGuard(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Not available for your EMR</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3 text-left">
+              <span className="block">
+                {emrBridgeGuard === 'match' ? 'Match Patient' : 'Sync EMR note'} is only supported for MDLand
+                iClinic EMR today.
+              </span>
+              <span className="block">
+                To support additional EMR systems, email{' '}
+                <a className="font-medium text-foreground underline" href={`mailto:${FASTDOC_SUPPORT_EMAIL}`}>
+                  {FASTDOC_SUPPORT_EMAIL}
+                </a>
+                .
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction type="button" onClick={() => setEmrBridgeGuard(null)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   )
 }
