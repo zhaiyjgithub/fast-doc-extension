@@ -92,7 +92,7 @@ export default defineBackground(() => {
         if (typeof activeUrl === 'string' && activeUrl.length > 0 && isRestrictedTabUrl(activeUrl)) {
           sendResponse({
             ok: false,
-            error: 'Active tab is a browser/internal page. Please switch to the MDLand tab and try again.',
+            error: 'Active tab is a browser/internal page. Please switch to the Office Visit tab and try again.',
           });
           return;
         }
