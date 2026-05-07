@@ -1,4 +1,8 @@
+import { Sentry, initSentry } from '@/lib/sentry';
+
 export default defineBackground(() => {
+  initSentry('background');
+
   void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
   type SyncChiefComplaintPayload = {
@@ -112,7 +116,21 @@ export default defineBackground(() => {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to message active tab';
         logBridgeDebug(message, 'relay failed with exception', { errorMessage, error });
-        if (typeof errorMessage === 'string' && /receiving end does not exist|could not establish connection/i.test(errorMessage)) {
+        const isExpectedDisconnect =
+          typeof errorMessage === 'string' &&
+          /receiving end does not exist|could not establish connection/i.test(errorMessage);
+
+        if (!isExpectedDisconnect) {
+          Sentry.captureException(error, {
+            tags: { surface: 'background.runtime.onMessage' },
+            extra: {
+              messageType: message.type,
+              relayContentType: relayTarget.contentType,
+            },
+          });
+        }
+
+        if (isExpectedDisconnect) {
           sendResponse({
             ok: false,
             error: 'Could not reach page script. Please focus a loaded MDLand eClinic tab and try again.',

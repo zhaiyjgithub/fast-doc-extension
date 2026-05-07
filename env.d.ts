@@ -14,6 +14,12 @@ interface ImportMetaEnv {
   readonly VITE_FASTDOC_API_BASE_URL_DEV?: string
   /** Optional FastDoc API base URL used only in production builds (`/v1` appended automatically if omitted). */
   readonly VITE_FASTDOC_API_BASE_URL_PROD?: string
+  /** Sentry DSN; shared fallback when mode-specific vars below are absent. Empty disables Sentry. */
+  readonly VITE_SENTRY_DSN?: string
+  /** Optional Sentry DSN used only when `import.meta.env.DEV` is true (takes precedence over `VITE_SENTRY_DSN`). */
+  readonly VITE_SENTRY_DSN_DEV?: string
+  /** Optional Sentry DSN used only in production builds (takes precedence over `VITE_SENTRY_DSN`). */
+  readonly VITE_SENTRY_DSN_PROD?: string
 }
 
 interface ImportMeta {
