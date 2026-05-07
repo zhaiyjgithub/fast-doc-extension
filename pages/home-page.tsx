@@ -341,7 +341,7 @@ export function HomePage({
               <button
                 type="button"
                 onClick={() => onNavigate('recording')}
-                className="flex min-h-[120px] flex-col justify-between rounded-lg bg-primary p-3 text-left shadow-sm transition-all hover:brightness-95 active:scale-[0.99] sm:min-h-[132px] sm:p-4"
+                className="flex min-h-[120px] flex-col justify-between rounded-lg bg-primary p-3 text-left transition-all hover:brightness-95 active:scale-[0.99] sm:min-h-[132px] sm:p-4"
               >
                 <div className="self-start rounded-full bg-white/30 p-1.5 sm:p-2">
                   <Mic className="size-4 text-primary-foreground sm:size-5" aria-hidden />
@@ -354,7 +354,7 @@ export function HomePage({
               <button
                 type="button"
                 onClick={onChangePatient}
-                className="flex min-h-[120px] flex-col justify-between rounded-lg border border-border/60 bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.99] sm:min-h-[132px] sm:p-4"
+                className="flex min-h-[120px] flex-col justify-between rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:bg-muted/60 active:scale-[0.99] sm:min-h-[132px] sm:p-4"
               >
                 <div className="self-start rounded-full bg-muted p-1.5 sm:p-2">
                   <Search className="size-4 text-muted-foreground sm:size-5" aria-hidden />
@@ -367,7 +367,7 @@ export function HomePage({
               <button
                 type="button"
                 onClick={() => void onTapMatchPatient?.()}
-                className="flex min-h-[120px] flex-col justify-between rounded-lg border border-emerald-200/90 bg-emerald-50 p-3 text-left shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-100/90 active:scale-[0.99] dark:border-emerald-800/80 dark:bg-emerald-950/45 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/65 sm:min-h-[132px] sm:p-4"
+                className="flex min-h-[120px] flex-col justify-between rounded-lg border border-emerald-200/90 bg-emerald-50 p-3 text-left transition-colors hover:border-emerald-300 hover:bg-emerald-100/90 active:scale-[0.99] dark:border-emerald-800/80 dark:bg-emerald-950/45 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/65 sm:min-h-[132px] sm:p-4"
               >
                 <div className="self-start rounded-full bg-emerald-100 p-1.5 dark:bg-emerald-900/55 sm:p-2">
                   <UserRoundSearch className="size-4 text-emerald-700 dark:text-emerald-300 sm:size-5" aria-hidden />

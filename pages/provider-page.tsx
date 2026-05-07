@@ -48,7 +48,7 @@ export function ProviderPage({ provider }: { provider: ProviderProfile }) {
       >
         <motion.div
           variants={providerPageItemVariants}
-          className="flex flex-col items-center gap-4 rounded-2xl border border-border/70 bg-card p-6 shadow-sm ring-1 ring-border/25"
+          className="flex flex-col items-center gap-4 rounded-2xl border border-border/70 bg-card p-6 ring-1 ring-border/25"
         >
           <Avatar className="size-20 rounded-full ring-2 ring-border/40">
             <AvatarFallback
@@ -65,7 +65,7 @@ export function ProviderPage({ provider }: { provider: ProviderProfile }) {
 
         <motion.section
           variants={providerPageItemVariants}
-          className="space-y-3 rounded-2xl border border-border/70 bg-card p-4 shadow-sm ring-1 ring-border/25"
+          className="space-y-3 rounded-2xl border border-border/70 bg-card p-4 ring-1 ring-border/25"
         >
           <h2 className="border-b border-border/50 pb-2 text-xs font-bold uppercase tracking-widest text-foreground/75">
             Details

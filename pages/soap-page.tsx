@@ -107,7 +107,7 @@ interface ReportCodeSuggestion {
 
 /** Matches SOAP section cards for consistent width and chrome. */
 const clinicalCodeCardClass =
-  'rounded-2xl border border-border/60 border-l-4 bg-card p-4 shadow-sm'
+  'rounded-2xl border border-border/60 border-l-4 bg-card p-4'
 
 const soapPageListVariants: Variants = {
   hidden: {},
@@ -396,7 +396,7 @@ function ClinicalCodeDetailDialog({
 
             <DialogFooter className="shrink-0 border-t border-border px-5 py-3 sm:justify-center">
               <DialogClose asChild>
-                <Button type="button" variant="outline" className="w-full sm:mt-0 sm:w-auto">
+                <Button type="button" variant="outline" className="w-full shadow-none sm:mt-0 sm:w-auto">
                   Close
                 </Button>
               </DialogClose>
@@ -468,14 +468,14 @@ function SoapFabMenu({
                   transition={{ delay: i * 0.05, ease: 'easeOut' }}
                   className="pointer-events-auto flex items-center gap-2"
                 >
-                  <span className="rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background shadow">
+                  <span className="rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background">
                     {item.label}
                   </span>
                   <motion.button
                     type="button"
                     whileTap={{ scale: 0.92 }}
                     onClick={() => handleAction(item.action)}
-                    className="flex size-10 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-md transition-colors hover:bg-accent"
+                    className="flex size-10 items-center justify-center rounded-full border border-border bg-card text-foreground transition-colors hover:bg-accent"
                     aria-label={item.label}
                   >
                     <Icon className="size-4" />
@@ -491,7 +491,7 @@ function SoapFabMenu({
           animate={{ rotate: open ? 45 : 0 }}
           transition={{ duration: 0.2 }}
           onClick={() => setOpen((v) => !v)}
-          className="pointer-events-auto flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+          className="pointer-events-auto flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground"
           aria-label="Actions"
           aria-expanded={open}
         >
@@ -519,7 +519,7 @@ function SyncTransferOverlay({ open }: { open: boolean }) {
             animate={{ y: 0, scale: 1, opacity: 1 }}
             exit={{ y: 10, scale: 0.99, opacity: 0 }}
             transition={{ duration: 0.24, ease: 'easeOut' }}
-            className="w-full max-w-md rounded-2xl border border-border/70 bg-card/95 px-5 py-5 shadow-xl"
+            className="w-full max-w-md rounded-2xl border border-border/70 bg-card/95 px-5 py-5"
           >
             <div className="mb-4 flex items-center justify-center">
               <motion.span
@@ -546,7 +546,7 @@ function SyncTransferOverlay({ open }: { open: boolean }) {
 
                 <div className="z-10 flex flex-col items-center gap-1.5">
                   <motion.div
-                    className="flex size-10 items-center justify-center rounded-xl bg-primary shadow-md shadow-primary/25"
+                    className="flex size-10 items-center justify-center rounded-xl bg-primary"
                     animate={{ scale: [1, 1.05, 1] }}
                     transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
                   >
@@ -565,7 +565,7 @@ function SyncTransferOverlay({ open }: { open: boolean }) {
               </div>
 
               <motion.div
-                className="pointer-events-none absolute top-[42%] size-3 -translate-y-1/2 rounded-full bg-primary shadow-[0_0_14px_rgba(99,102,241,0.85)]"
+                className="pointer-events-none absolute top-[42%] size-3 -translate-y-1/2 rounded-full bg-primary"
                 animate={{ left: ['84%', '16%'] }}
                 transition={{ duration: 1.35, repeat: Infinity, ease: 'linear' }}
               />
@@ -763,7 +763,7 @@ export function SoapPage({
   }
 
   const patientHeaderShellClass =
-    'relative flex w-full flex-col gap-3 rounded-lg bg-primary/25 p-4 shadow-sm ring-1 ring-primary/20'
+    'relative flex w-full flex-col gap-3 rounded-lg bg-primary/25 p-4 ring-1 ring-primary/20'
 
   const patientHeaderBody = (
     <>
@@ -941,7 +941,7 @@ export function SoapPage({
                   key={s.id}
                   variants={soapPageItemVariants}
                   className={cn(
-                    'rounded-2xl border border-border/60 border-l-4 bg-card p-4 shadow-sm',
+                    'rounded-2xl border border-border/60 border-l-4 bg-card p-4',
                     s.borderClass,
                   )}
                 >
@@ -1107,14 +1107,14 @@ export function SoapPage({
               <Button
                 type="button"
                 variant="outline"
-                className="h-11 flex-1 text-base font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.12)] dark:shadow-[0_4px_18px_rgba(0,0,0,0.35)]"
+                className="h-11 flex-1 text-base font-semibold"
                 onClick={handleCancelEdit}
               >
                 Cancel
               </Button>
               <Button
                 type="button"
-                className="h-11 flex-1 text-base font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.18)] dark:shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
+                className="h-11 flex-1 text-base font-semibold"
                 onClick={handleSave}
               >
                 Save

@@ -1144,7 +1144,7 @@ export default function App() {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-9 gap-1.5 px-2.5 text-xs font-medium"
+                className="h-9 gap-1.5 px-2.5 text-xs font-medium shadow-none"
                 onClick={() => openCreatePatient('recording')}
               >
                 <UserPlus className="size-4 shrink-0" aria-hidden />

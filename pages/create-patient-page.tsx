@@ -10,8 +10,25 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { motion, type Variants } from 'motion/react'
 import type { CreatePatientPayload } from '@/lib/patient-api'
 import { toast } from 'sonner'
+
+const listVariants: Variants = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: 0.055, delayChildren: 0.04 },
+  },
+}
+
+const itemVariants: Variants = {
+  hidden: { opacity: 0, y: 14 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] },
+  },
+}
 
 const MM_DD_YYYY_RE = /^(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/(\d{4})$/
 const YYYY_MM_DD_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
@@ -85,8 +102,14 @@ export function CreatePatientPage({ onCancel, onSave, isSaving }: CreatePatientP
 
   return (
     <ScrollArea className="h-full min-h-0 bg-background">
-      <form onSubmit={handleSubmit} className="space-y-5 px-4 py-4 pb-28">
-        <div className="space-y-2">
+      <motion.form
+        onSubmit={handleSubmit}
+        className="space-y-5 px-4 py-4 pb-28"
+        variants={listVariants}
+        initial="hidden"
+        animate="show"
+      >
+        <motion.div variants={itemVariants} className="space-y-2">
           <Label htmlFor="create-patient-first">First name</Label>
           <Input
             id="create-patient-first"
@@ -95,8 +118,8 @@ export function CreatePatientPage({ onCancel, onSave, isSaving }: CreatePatientP
             onChange={(ev) => setFirstName(ev.target.value)}
             disabled={isSaving}
           />
-        </div>
-        <div className="space-y-2">
+        </motion.div>
+        <motion.div variants={itemVariants} className="space-y-2">
           <Label htmlFor="create-patient-last">Last name</Label>
           <Input
             id="create-patient-last"
@@ -105,8 +128,8 @@ export function CreatePatientPage({ onCancel, onSave, isSaving }: CreatePatientP
             onChange={(ev) => setLastName(ev.target.value)}
             disabled={isSaving}
           />
-        </div>
-        <div className="space-y-2">
+        </motion.div>
+        <motion.div variants={itemVariants} className="space-y-2">
           <Label htmlFor="create-patient-dob">Date of birth</Label>
           <Input
             id="create-patient-dob"
@@ -115,8 +138,8 @@ export function CreatePatientPage({ onCancel, onSave, isSaving }: CreatePatientP
             onChange={(ev) => setDateOfBirth(ev.target.value)}
             disabled={isSaving}
           />
-        </div>
-        <div className="space-y-2">
+        </motion.div>
+        <motion.div variants={itemVariants} className="space-y-2">
           <Label>Gender</Label>
           <Select
             value={gender || undefined}
@@ -132,8 +155,8 @@ export function CreatePatientPage({ onCancel, onSave, isSaving }: CreatePatientP
               <SelectItem value="Other">Other</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-2">
+        </motion.div>
+        <motion.div variants={itemVariants} className="space-y-2">
           <Label htmlFor="create-patient-cpid">Clinic patient ID (optional)</Label>
           <Input
             id="create-patient-cpid"
@@ -141,8 +164,8 @@ export function CreatePatientPage({ onCancel, onSave, isSaving }: CreatePatientP
             onChange={(ev) => setClinicPatientId(ev.target.value)}
             disabled={isSaving}
           />
-        </div>
-        <div className="space-y-2">
+        </motion.div>
+        <motion.div variants={itemVariants} className="space-y-2">
           <Label htmlFor="create-patient-email">Email (optional)</Label>
           <Input
             id="create-patient-email"
@@ -155,8 +178,8 @@ export function CreatePatientPage({ onCancel, onSave, isSaving }: CreatePatientP
           <p className="text-xs text-muted-foreground">
             If provided with date of birth, used to detect an existing patient in your clinic.
           </p>
-        </div>
-        <div className="space-y-2">
+        </motion.div>
+        <motion.div variants={itemVariants} className="space-y-2">
           <Label htmlFor="create-patient-phone">Phone (optional)</Label>
           <Input
             id="create-patient-phone"
@@ -166,16 +189,19 @@ export function CreatePatientPage({ onCancel, onSave, isSaving }: CreatePatientP
             onChange={(ev) => setPhone(ev.target.value)}
             disabled={isSaving}
           />
-        </div>
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
+        </motion.div>
+        <motion.div
+          variants={itemVariants}
+          className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end"
+        >
           <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
             Cancel
           </Button>
           <Button type="submit" disabled={isSaving}>
             {isSaving ? 'Saving…' : 'Save'}
           </Button>
-        </div>
-      </form>
+        </motion.div>
+      </motion.form>
     </ScrollArea>
   )
 }
