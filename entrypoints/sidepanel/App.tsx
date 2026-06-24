@@ -105,6 +105,19 @@ type SyncChiefComplaintPayload = {
 const DEBUG_EMR_BRIDGE = true
 const NOTES_PAGE_SIZE = 10
 const NOTES_SEARCH_DEBOUNCE_MS = 350
+
+function notesLoadSignature(
+  isLoggedIn: boolean,
+  accessToken: string | null,
+  page: number,
+  query: string,
+  startDate: string,
+  endDate: string,
+): string {
+  return [isLoggedIn ? 'signed-in' : 'signed-out', accessToken ?? '', page, query, startDate, endDate].join(
+    '\0',
+  )
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MM_DD_YYYY_RE = /^(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/(\d{4})$/
 const YYYY_MM_DD_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
@@ -177,7 +190,7 @@ function errorStatusCode(error: unknown): number | null {
 const NAV_TABS: NavTab[] = [
   { id: 'home', label: 'Home', icon: <Home className="h-5 w-5" /> },
   { id: 'recording', label: 'Record', icon: <Mic className="h-5 w-5" /> },
-  { id: 'notes', label: 'Notes', icon: <FileText className="h-5 w-5" /> },
+  { id: 'notes', label: 'Encounters', icon: <FileText className="h-5 w-5" /> },
   { id: 'settings', label: 'Settings', icon: <Settings className="h-5 w-5" /> },
 ]
 
@@ -216,12 +229,16 @@ export default function App() {
   const [notesHasMore, setNotesHasMore] = React.useState(false)
   const [notesSearchQuery, setNotesSearchQuery] = React.useState('')
   const [notesDebouncedQuery, setNotesDebouncedQuery] = React.useState('')
+  const [notesStartDate, setNotesStartDate] = React.useState('')
+  const [notesEndDate, setNotesEndDate] = React.useState('')
+  const [soapReturnPage, setSoapReturnPage] = React.useState<'home' | 'notes' | 'recording'>('home')
   const [transcriptReturnPage, setTranscriptReturnPage] = React.useState<AppPage>('soap')
   const [createPatientReturnPage, setCreatePatientReturnPage] = React.useState<'recording'>('recording')
   const [isCreatingPatient, setIsCreatingPatient] = React.useState(false)
   const [emrBridgeGuard, setEmrBridgeGuard] = React.useState<'match' | 'sync' | null>(null)
   const [isEmrGenerating, setIsEmrGenerating] = React.useState(false)
   const emrPollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+  const notesLoadSignatureRef = React.useRef('')
 
   const expireSessionAndRedirectToLogin = React.useCallback(async () => {
     try {
@@ -254,6 +271,9 @@ export default function App() {
     setNotesHasMore(false)
     setNotesSearchQuery('')
     setNotesDebouncedQuery('')
+    setNotesStartDate('')
+    setNotesEndDate('')
+    notesLoadSignatureRef.current = ''
     setIsCreatingPatient(false)
     setCurrentPage('home')
     toast.warning('Session expired. Please sign in again.')
@@ -358,7 +378,7 @@ export default function App() {
   )
 
   const loadNotesEncountersPage = React.useCallback(
-    async (page: number, query: string, showToastOnError = true) => {
+    async (page: number, query: string, startDate: string, endDate: string, showToastOnError = true) => {
       if (!accessToken || !isLoggedIn) {
         setNotesEncounters([])
         setNotesHasMore(false)
@@ -367,6 +387,8 @@ export default function App() {
 
       try {
         const trimmedQuery = query.trim()
+        const sd = startDate.trim() || undefined
+        const ed = endDate.trim() || undefined
         const encounters = await withAuthRetry((token) => {
           if (trimmedQuery) {
             const smartSearch = buildEncounterSearchOptionsFromQuery(trimmedQuery)
@@ -374,9 +396,11 @@ export default function App() {
               ...smartSearch,
               page,
               pageSize: NOTES_PAGE_SIZE,
+              startDate: sd,
+              endDate: ed,
             })
           }
-          return listEncounters(token, { page, pageSize: NOTES_PAGE_SIZE })
+          return listEncounters(token, { page, pageSize: NOTES_PAGE_SIZE, startDate: sd, endDate: ed })
         })
         setNotesEncounters(encounters)
         setNotesHasMore(encounters.length >= NOTES_PAGE_SIZE)
@@ -393,7 +417,11 @@ export default function App() {
   )
 
   const openEncounterInSoap = React.useCallback(
-    async (encounterId: string, summary?: EncounterSummary) => {
+    async (
+      encounterId: string,
+      summary?: EncounterSummary,
+      returnPage: 'home' | 'notes' | 'recording' = 'home',
+    ) => {
       if (!isLoggedIn || !accessToken) {
         toast.warning('Please sign in to open encounter notes.')
         return
@@ -406,6 +434,7 @@ export default function App() {
       }
 
       setActiveEncounterId(id)
+      setSoapReturnPage(returnPage)
       if (summary) {
         setActiveEncounterSummary(summary)
       }
@@ -528,6 +557,7 @@ export default function App() {
 
       // Navigate to soap page immediately with loading state
       setIsEmrGenerating(true)
+      setSoapReturnPage('recording')
       setCurrentPage('soap')
 
       // Clear any existing poll interval
@@ -624,7 +654,14 @@ export default function App() {
     setSoapFlowPhase('idle')
     setPatientDetailsPatient(null)
     setPatientDemoEncounterId(null)
+    if (id === 'home' || id === 'notes' || id === 'recording') {
+      setSoapReturnPage(id)
+    }
     setCurrentPage(id)
+  }
+
+  function closeSoapPage() {
+    setCurrentPage(soapReturnPage)
   }
 
   function openPatientDemographic(from: 'home' | 'notes', encounterId: string) {
@@ -851,8 +888,29 @@ export default function App() {
     if (currentPage !== 'notes') {
       return
     }
-    void loadNotesEncountersPage(notesPage, notesDebouncedQuery, false)
-  }, [currentPage, loadNotesEncountersPage, notesDebouncedQuery, notesPage])
+    const signature = notesLoadSignature(
+      isLoggedIn,
+      accessToken,
+      notesPage,
+      notesDebouncedQuery,
+      notesStartDate,
+      notesEndDate,
+    )
+    if (notesLoadSignatureRef.current === signature) {
+      return
+    }
+    notesLoadSignatureRef.current = signature
+    void loadNotesEncountersPage(notesPage, notesDebouncedQuery, notesStartDate, notesEndDate, false)
+  }, [
+    currentPage,
+    isLoggedIn,
+    accessToken,
+    loadNotesEncountersPage,
+    notesDebouncedQuery,
+    notesPage,
+    notesStartDate,
+    notesEndDate,
+  ])
 
   React.useEffect(() => {
     const timer = setTimeout(() => {
@@ -938,6 +996,9 @@ export default function App() {
       setNotesHasMore(false)
       setNotesSearchQuery('')
       setNotesDebouncedQuery('')
+      setNotesStartDate('')
+      setNotesEndDate('')
+      notesLoadSignatureRef.current = ''
       setIsCreatingPatient(false)
       setCurrentPage('home')
       toast.info('Signed out')
@@ -1098,7 +1159,7 @@ export default function App() {
 
   const PAGE_TITLES: Record<AppPage, string> = {
     home: 'FastDoc',
-    notes: 'Notes',
+    notes: 'Encounters',
     recording: 'Recording',
     soap: 'AI EMR',
     transcript: 'Transcript',
@@ -1163,7 +1224,9 @@ export default function App() {
                     ? () => setCurrentPage(transcriptReturnPage)
                     : currentPage === 'provider'
                       ? closeProviderPage
-                      : undefined
+                      : currentPage === 'soap'
+                        ? closeSoapPage
+                        : undefined
           }
         />
       )}
@@ -1189,7 +1252,7 @@ export default function App() {
             onNavigate={(page) => handleNavChange(page)}
             encounters={homeEncounters}
             weeklyInsight={homeWeeklyInsight}
-            onOpenEncounter={(encounterId) => void openEncounterInSoap(encounterId)}
+            onOpenEncounter={(encounterId) => void openEncounterInSoap(encounterId, undefined, 'home')}
           />
         )}
         {currentPage === 'notes' && (
@@ -1205,7 +1268,24 @@ export default function App() {
             hasMore={notesHasMore}
             onPrevPage={() => setNotesPage((prev) => Math.max(1, prev - 1))}
             onNextPage={() => setNotesPage((prev) => prev + 1)}
-            onOpenEncounter={(encounterId) => void openEncounterInSoap(encounterId)}
+            startDate={notesStartDate}
+            endDate={notesEndDate}
+            onApplyFilter={(start, end) => {
+              const nextPage = 1
+              setNotesStartDate(start)
+              setNotesEndDate(end)
+              setNotesPage(nextPage)
+              notesLoadSignatureRef.current = notesLoadSignature(
+                isLoggedIn,
+                accessToken,
+                nextPage,
+                notesDebouncedQuery,
+                start,
+                end,
+              )
+              void loadNotesEncountersPage(1, notesDebouncedQuery, start, end, false)
+            }}
+            onOpenEncounter={(encounterId) => void openEncounterInSoap(encounterId, undefined, 'notes')}
           />
         )}
         {currentPage === 'recording' && (

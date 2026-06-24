@@ -1,9 +1,11 @@
 import { differenceInYears, format, isValid, parseISO } from 'date-fns'
 import { FileText } from 'lucide-react'
 import { motion, type Variants } from 'motion/react'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { Patient } from '@/components/patient/patient-search-sheet'
 import type { EncounterSummary } from '@/lib/encounter-api'
+import { cn } from '@/lib/utils'
 
 interface TranscriptPageProps {
   patient?: Patient | null
@@ -27,10 +29,26 @@ function patientDisplayName(patient: Patient): string {
   return `${patient.firstName} ${patient.lastName}`.trim()
 }
 
+function encounterPatientDisplayName(encounter: EncounterSummary | null | undefined): string {
+  const first = encounter?.patientFirstName?.trim() ?? ''
+  const last = encounter?.patientLastName?.trim() ?? ''
+  return `${first} ${last}`.trim()
+}
+
 function shortPatientLabel(patientId: string | null | undefined): string {
   const normalized = patientId?.trim()
   if (!normalized) return 'Unknown patient'
   return `Patient ${normalized.slice(0, 8)}`
+}
+
+function initialsFromDisplayName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return `${parts[0]![0] ?? ''}${parts[parts.length - 1]![0] ?? ''}`.toUpperCase() || '?'
+  }
+  const one = parts[0] ?? name.trim()
+  if (one.length >= 2) return one.slice(0, 2).toUpperCase()
+  return (one[0] ?? '?').toUpperCase()
 }
 
 type TranscriptLine = {
@@ -80,6 +98,8 @@ function parseTranscriptLines(transcriptText: string): TranscriptLine[] {
 export function TranscriptPage({ patient, encounter }: TranscriptPageProps) {
   const transcriptText = encounter?.transcriptText?.trim() ?? ''
   const transcriptLines = parseTranscriptLines(transcriptText)
+  const patientName =
+    patient ? patientDisplayName(patient) : encounterPatientDisplayName(encounter) || shortPatientLabel(encounter?.patientId)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -132,12 +152,28 @@ export function TranscriptPage({ patient, encounter }: TranscriptPageProps) {
                   const normalizedSpeaker = line.speaker.toLowerCase()
                   const isDoctor = normalizedSpeaker === 'doctor'
                   const isPatient = normalizedSpeaker === 'patient'
+                  const avatarName = isPatient ? patientName : isDoctor ? 'Doctor' : line.speaker
+                  const avatarInitials = isDoctor ? 'DR' : initialsFromDisplayName(avatarName)
+                  const avatarClass = isDoctor
+                    ? 'bg-muted text-foreground ring-1 ring-border/60'
+                    : isPatient
+                      ? 'bg-primary/15 text-primary ring-1 ring-primary/20'
+                      : 'bg-card text-foreground ring-1 ring-border/60'
                   return (
                     <motion.li
                       key={`${line.speaker}-${index}`}
                       variants={transcriptLineVariants}
-                      className={`flex ${isDoctor ? 'justify-end' : 'justify-start'}`}
+                      className={cn('flex items-end gap-2', isDoctor && 'justify-end')}
                     >
+                      {!isDoctor ? (
+                        <Avatar className="size-8 shrink-0 rounded-full">
+                          <AvatarFallback
+                            className={cn('text-[10px] font-semibold', avatarClass)}
+                          >
+                            {avatarInitials}
+                          </AvatarFallback>
+                        </Avatar>
+                      ) : null}
                       <div
                         className={`max-w-[88%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
                           isDoctor
@@ -152,6 +188,15 @@ export function TranscriptPage({ patient, encounter }: TranscriptPageProps) {
                         </p>
                         <p className="whitespace-pre-wrap">{line.text}</p>
                       </div>
+                      {isDoctor ? (
+                        <Avatar className="size-8 shrink-0 rounded-full">
+                          <AvatarFallback
+                            className={cn('text-[10px] font-semibold', avatarClass)}
+                          >
+                            {avatarInitials}
+                          </AvatarFallback>
+                        </Avatar>
+                      ) : null}
                     </motion.li>
                   )
                 })}

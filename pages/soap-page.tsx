@@ -27,7 +27,6 @@ import {
   MoreHorizontal,
   Pencil,
   Sparkles,
-  Zap,
 } from 'lucide-react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { toast } from 'sonner'
@@ -550,7 +549,26 @@ function SyncTransferOverlay({ open }: { open: boolean }) {
                     animate={{ scale: [1, 1.05, 1] }}
                     transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
                   >
-                    <Zap className="size-5 text-primary-foreground" aria-hidden />
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="size-5 text-primary-foreground"
+                      aria-hidden
+                    >
+                      <path d="M10 3H8"/>
+                      <path d="m15.007 5.008 3.987 3.986"/>
+                      <path d="M20 15v4"/>
+                      <path d="M21.174 6.813a2.82 2.82 0 0 0-3.986-3.987L3.842 16.175a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+                      <path d="M22 17h-4"/>
+                      <path d="M4 5v4"/>
+                      <path d="M6 7H2"/>
+                      <path d="M9 2v2"/>
+                    </svg>
                   </motion.div>
                   <span className="text-[11px] font-semibold tracking-wide text-foreground/90">FastDoc</span>
                 </div>
@@ -1084,7 +1102,7 @@ export function SoapPage({
 
       <SyncTransferOverlay open={isSyncAnimating} />
 
-      {!isEditing ? (
+      {!isEditing && !isGenerating ? (
         <SoapFabMenu
           onCopy={handleCopy}
           onSync={handleSync}

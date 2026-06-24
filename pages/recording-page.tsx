@@ -311,24 +311,7 @@ export function RecordingPage({
   const [sttLanguage, setSttLanguage] = React.useState(DEFAULT_DEEPGRAM_STT_LANGUAGE)
   const [isConnectingDeepgram, setIsConnectingDeepgram] = React.useState(false)
   const [elapsedTime, setElapsedTime] = React.useState(0)
-  const [transcript, setTranscript] = React.useState(
-    `Doctor: Good morning. What brings you in today?\n` +
-    `Patient: Hi, doctor. I've been having a really bad cough for about two weeks now. It started with a runny nose and sore throat, but those are mostly gone. Now it's mostly this deep chest cough that won't go away.\n` +
-    `Doctor: I see. Is the cough dry, or are you bringing up any mucus?\n` +
-    `Patient: Mostly dry, but sometimes in the morning there's some yellowish stuff.\n` +
-    `Doctor: Any fever or chills?\n` +
-    `Patient: I had a low-grade fever a few days ago—around 38 degrees—but it's been normal since yesterday.\n` +
-    `Doctor: Any shortness of breath or chest pain when you cough or breathe deeply?\n` +
-    `Patient: A little shortness of breath when I climb stairs, and the coughing fits do make my chest sore.\n` +
-    `Doctor: Okay. Have you been around anyone who was sick recently, or any exposure to chemicals or smoke?\n` +
-    `Patient: My coworker had the flu last week. I don't smoke, but our office has been dusty from some renovation work.\n` +
-    `Doctor: Understood. Any history of asthma, COPD, or recurring chest infections?\n` +
-    `Patient: No, I've always been pretty healthy. No allergies that I know of either.\n` +
-    `Doctor: Alright. Based on your symptoms—the productive cough, low-grade fever, and chest discomfort—I want to listen to your lungs and possibly order a chest X-ray to rule out pneumonia. It could also be acute bronchitis, which is very common after a viral upper respiratory infection.\n` +
-    `Patient: Is it serious? Do I need antibiotics?\n` +
-    `Doctor: If it's bacterial pneumonia, yes. But acute bronchitis is usually viral and resolves on its own. Let's do the exam and imaging first before deciding. In the meantime, I'll recommend rest, plenty of fluids, and a cough suppressant if the cough is disrupting your sleep.\n` +
-    `Patient: Okay, that makes sense. Thank you, doctor.`
-  )
+  const [transcript, setTranscript] = React.useState('')
   const [liveLines, setLiveLines] = React.useState<LiveLine[]>([])
   const [showManualInput, setShowManualInput] = React.useState(false)
   const [emrContext, setEmrContext] = React.useState('')

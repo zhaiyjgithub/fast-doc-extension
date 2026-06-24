@@ -7,6 +7,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme="system"
       className="toaster group"
+      offset="calc(5rem + env(safe-area-inset-bottom))"
       toastOptions={{
         classNames: {
           toast:

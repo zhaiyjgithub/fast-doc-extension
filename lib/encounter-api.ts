@@ -13,6 +13,8 @@ export type EncounterSummary = {
   careSetting: string
   chiefComplaint: string | null
   status: string
+  /** ISO 8601 from `created_at` when provided by the API. */
+  createdAt: string | null
   hasTranscript: boolean
   transcriptText: string | null
   latestEmr: Record<string, unknown> | null
@@ -33,6 +35,10 @@ export type ListEncountersOptions = {
   page?: number
   pageSize?: number
   todayOnly?: boolean
+  startDate?: string
+  endDate?: string
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
 }
 
 export type SearchEncountersOptions = {
@@ -45,6 +51,10 @@ export type SearchEncountersOptions = {
   language?: string
   page?: number
   pageSize?: number
+  startDate?: string
+  endDate?: string
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
 }
 
 export class EncounterApiError extends Error {
@@ -177,6 +187,7 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
   const careSetting = asNonEmptyString(payload.care_setting)
   const chiefComplaint = asOptionalNullableString(payload.chief_complaint)
   const status = asNonEmptyString(payload.status)
+  const createdAt = asOptionalNullableString(payload.created_at) ?? null
   const transcriptText = asOptionalNullableString(payload.transcript_text)
   const latestEmr = asOptionalRecord(payload.latest_emr)
   const emrSource = asOptionalNullableString(payload.emr_source)
@@ -217,12 +228,27 @@ function parseEncounterSummary(payload: unknown): EncounterSummary {
     careSetting,
     chiefComplaint,
     status,
+    createdAt,
     hasTranscript,
     transcriptText,
     latestEmr,
     emrSource,
     emrUpdatedAt,
   }
+}
+
+function timestampMs(value: string | null | undefined): number {
+  if (!value) return 0
+  const ms = new Date(value).getTime()
+  return Number.isFinite(ms) ? ms : 0
+}
+
+function sortEncountersByCreatedDateDesc(encounters: EncounterSummary[]): EncounterSummary[] {
+  return [...encounters].sort((a, b) => {
+    const createdDelta = timestampMs(b.createdAt) - timestampMs(a.createdAt)
+    if (createdDelta !== 0) return createdDelta
+    return timestampMs(b.encounterTime) - timestampMs(a.encounterTime)
+  })
 }
 
 async function requestEncounterEndpoint(
@@ -304,6 +330,10 @@ export async function listEncounters(
   if (typeof opts.todayOnly === 'boolean') {
     params.set('today_only', String(opts.todayOnly))
   }
+  if (opts.startDate?.trim()) params.set('start_date', opts.startDate.trim())
+  if (opts.endDate?.trim()) params.set('end_date', opts.endDate.trim())
+  params.set('sort_by', opts.sortBy?.trim() || 'created_at')
+  params.set('sort_order', opts.sortOrder ?? 'desc')
 
   const query = params.toString()
   const body = await requestEncounterEndpoint(
@@ -319,7 +349,7 @@ export async function listEncounters(
     throw new Error('Encounter list response payload is invalid.')
   }
 
-  return body.map(parseEncounterSummary)
+  return sortEncountersByCreatedDateDesc(body.map(parseEncounterSummary))
 }
 
 export async function getEncounter(
@@ -357,6 +387,10 @@ export async function searchEncounters(
   if (opts.language?.trim()) params.set('language', opts.language.trim())
   if (typeof opts.page === 'number') params.set('page', String(opts.page))
   if (typeof opts.pageSize === 'number') params.set('page_size', String(opts.pageSize))
+  if (opts.startDate?.trim()) params.set('start_date', opts.startDate.trim())
+  if (opts.endDate?.trim()) params.set('end_date', opts.endDate.trim())
+  params.set('sort_by', opts.sortBy?.trim() || 'created_at')
+  params.set('sort_order', opts.sortOrder ?? 'desc')
 
   const query = params.toString()
   const body = await requestEncounterEndpoint(
@@ -369,5 +403,5 @@ export async function searchEncounters(
   if (!Array.isArray(body)) {
     throw new Error('Encounter search response payload is invalid.')
   }
-  return body.map(parseEncounterSummary)
+  return sortEncountersByCreatedDateDesc(body.map(parseEncounterSummary))
 }

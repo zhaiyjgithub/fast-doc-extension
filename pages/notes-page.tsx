@@ -1,5 +1,8 @@
 import * as React from 'react'
+import { format } from 'date-fns'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
 import {
   Pagination,
   PaginationContent,
@@ -8,9 +11,10 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { FileText, Search } from 'lucide-react'
+import { CalendarIcon, FileText, Filter, Search, X } from 'lucide-react'
 import { motion, type Variants } from 'motion/react'
 import { avatarFallbackClassForName } from '@/lib/avatar-fallback-by-name'
 import type { EncounterSummary } from '@/lib/encounter-api'
@@ -44,6 +48,9 @@ interface NotesPageProps {
   hasMore: boolean
   onPrevPage: () => void
   onNextPage: () => void
+  startDate: string
+  endDate: string
+  onApplyFilter: (start: string, end: string) => void
   /** Opens AI EMR when user taps an encounter. */
   onOpenEncounter?: (encounterId: string) => void
   /** Opens patient demographics when user taps the patient name row. */
@@ -129,6 +136,25 @@ function formatEncounterTime(timestamp: string): string {
   }).format(date)
 }
 
+function parseLocalDate(s: string): Date | undefined {
+  if (!s) return undefined
+  const parts = s.split('-').map(Number)
+  if (parts.length !== 3 || parts.some((n) => !n)) return undefined
+  return new Date(parts[0]!, parts[1]! - 1, parts[2]!)
+}
+
+function formatDateLabel(value: string): string {
+  const date = parseLocalDate(value)
+  return date ? format(date, 'MMM d, yyyy') : value
+}
+
+function formatDateRangeLabel(start: string, end: string): string {
+  if (start && end) return `${formatDateLabel(start)} - ${formatDateLabel(end)}`
+  if (start) return `From ${formatDateLabel(start)}`
+  if (end) return `Until ${formatDateLabel(end)}`
+  return ''
+}
+
 export function NotesPage({
   patientId: _patientId,
   encounters,
@@ -138,9 +164,47 @@ export function NotesPage({
   hasMore,
   onPrevPage,
   onNextPage,
+  startDate,
+  endDate,
+  onApplyFilter,
   onOpenEncounter,
   onOpenEncounterPatient,
 }: NotesPageProps) {
+  const [filterOpen, setFilterOpen] = React.useState(false)
+  const [openCalendar, setOpenCalendar] = React.useState<'start' | 'end' | null>(null)
+  const [localStart, setLocalStart] = React.useState(startDate)
+  const [localEnd, setLocalEnd] = React.useState(endDate)
+  const [filterError, setFilterError] = React.useState('')
+
+  React.useEffect(() => {
+    setLocalStart(startDate)
+    setLocalEnd(endDate)
+  }, [startDate, endDate])
+
+  function handleApplyFilter() {
+    if (localStart && localEnd && localStart > localEnd) {
+      setFilterError('Start date must be on or before end date.')
+      return
+    }
+    setFilterError('')
+    onApplyFilter(localStart, localEnd)
+    setFilterOpen(false)
+    setOpenCalendar(null)
+  }
+
+  function handleClearFilter() {
+    setLocalStart('')
+    setLocalEnd('')
+    setFilterError('')
+    onApplyFilter('', '')
+    setFilterOpen(false)
+    setOpenCalendar(null)
+  }
+
+  const appliedDateRangeLabel = formatDateRangeLabel(startDate, endDate)
+  const draftDateRangeLabel = formatDateRangeLabel(localStart, localEnd)
+  const hasActiveFilter = appliedDateRangeLabel !== ''
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <motion.div
@@ -175,9 +239,147 @@ export function NotesPage({
           initial="hidden"
           animate="show"
         >
-          <motion.h2 variants={notesPageItemVariants} className="text-lg font-bold text-foreground">
-            Encounters
-          </motion.h2>
+          <motion.div variants={notesPageItemVariants} className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-foreground">History</h2>
+            <Popover
+              open={filterOpen}
+              onOpenChange={(open) => {
+                setFilterOpen(open)
+                setOpenCalendar(null)
+                setFilterError('')
+                if (open) {
+                  setLocalStart(startDate)
+                  setLocalEnd(endDate)
+                }
+              }}
+            >
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    'h-7 gap-1.5 px-2 text-xs text-foreground shadow-none',
+                    hasActiveFilter && 'border-border/70 bg-muted/35',
+                  )}
+                  aria-label="Filter encounters by date range"
+                >
+                  <Filter className="size-3.5" aria-hidden />
+                  {!hasActiveFilter && <span>Filter</span>}
+                  {appliedDateRangeLabel && (
+                    <span className="max-w-[132px] truncate text-[11px] font-normal">
+                      {appliedDateRangeLabel}
+                    </span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-3" align="end">
+                <div className="space-y-3">
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-semibold">Date range</p>
+                    {draftDateRangeLabel && (
+                      <p className="max-w-[260px] truncate text-xs text-muted-foreground">
+                        {draftDateRangeLabel}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Start date */}
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground">Start date</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(
+                        'w-full justify-start gap-2 text-left text-xs font-normal shadow-none h-8',
+                        !localStart && 'text-muted-foreground',
+                      )}
+                      onClick={() => setOpenCalendar(openCalendar === 'start' ? null : 'start')}
+                    >
+                      <CalendarIcon className="size-3.5 shrink-0" aria-hidden />
+                      {localStart ? formatDateLabel(localStart) : 'Pick a date'}
+                    </Button>
+                    {openCalendar === 'start' && (
+                      <div className="rounded-md border">
+                        <Calendar
+                          mode="single"
+                          captionLayout="dropdown"
+                          fromYear={2020}
+                          toYear={new Date().getFullYear()}
+                          selected={parseLocalDate(localStart)}
+                          onSelect={(date) => {
+                            setLocalStart(date ? format(date, 'yyyy-MM-dd') : '')
+                            setOpenCalendar(null)
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* End date */}
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground">End date</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(
+                        'w-full justify-start gap-2 text-left text-xs font-normal shadow-none h-8',
+                        !localEnd && 'text-muted-foreground',
+                      )}
+                      onClick={() => setOpenCalendar(openCalendar === 'end' ? null : 'end')}
+                    >
+                      <CalendarIcon className="size-3.5 shrink-0" aria-hidden />
+                      {localEnd ? formatDateLabel(localEnd) : 'Pick a date'}
+                    </Button>
+                    {openCalendar === 'end' && (
+                      <div className="rounded-md border">
+                        <Calendar
+                          mode="single"
+                          captionLayout="dropdown"
+                          fromYear={2020}
+                          toYear={new Date().getFullYear()}
+                          selected={parseLocalDate(localEnd)}
+                          onSelect={(date) => {
+                            setLocalEnd(date ? format(date, 'yyyy-MM-dd') : '')
+                            setOpenCalendar(null)
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Validation error */}
+                  {filterError && (
+                    <p className="text-xs text-destructive">{filterError}</p>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 flex-1 text-xs"
+                      onClick={handleApplyFilter}
+                    >
+                      Apply
+                    </Button>
+                    {(localStart || localEnd || hasActiveFilter) && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 px-2 text-xs shadow-none"
+                        onClick={handleClearFilter}
+                      >
+                        <X className="size-3" aria-hidden />
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </motion.div>
           {encounters.length === 0 && (
             <motion.div
               variants={notesPageItemVariants}
@@ -185,7 +387,9 @@ export function NotesPage({
             >
               <FileText className="h-8 w-8" />
               <p className="text-center text-sm">
-                {searchQuery.trim() ? 'No encounters match your search.' : 'No encounters found.'}
+                {searchQuery.trim() || hasActiveFilter
+                  ? 'No encounters match your search or filter.'
+                  : 'No encounters found.'}
               </p>
             </motion.div>
           )}

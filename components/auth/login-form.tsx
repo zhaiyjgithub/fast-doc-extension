@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { Stethoscope, Mail, Lock, Eye, EyeOff } from 'lucide-react'
+import { Mail, Lock, Eye, EyeOff } from 'lucide-react'
 
 interface LoginFormProps {
   onLogin: (username: string, password: string) => void
@@ -42,7 +42,26 @@ export function LoginForm({ onLogin, isLoading = false }: LoginFormProps) {
       <main className="relative z-10 flex w-full max-w-[400px] flex-col gap-8">
         <header className="flex flex-col items-center gap-4 text-center">
           <div className="flex size-20 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/25">
-            <Stethoscope className="size-10 text-primary-foreground" aria-hidden />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-10 text-primary-foreground"
+              aria-hidden
+            >
+              <path d="M10 3H8"/>
+              <path d="m15.007 5.008 3.987 3.986"/>
+              <path d="M20 15v4"/>
+              <path d="M21.174 6.813a2.82 2.82 0 0 0-3.986-3.987L3.842 16.175a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+              <path d="M22 17h-4"/>
+              <path d="M4 5v4"/>
+              <path d="M6 7H2"/>
+              <path d="M9 2v2"/>
+            </svg>
           </div>
           <div className="space-y-1">
             <h1 className="text-3xl font-extrabold tracking-tight text-foreground">FastDoc</h1>

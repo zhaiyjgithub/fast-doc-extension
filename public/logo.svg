@@ -6,7 +6,6 @@
   xmlns="http://www.w3.org/2000/svg"
 >
   <rect width="72" height="72" fill="none" />
-  <!-- Lucide paths are in 0–24 space; scale + center to fill ~72×72 like wxt.svg -->
   <g transform="translate(6, 6) scale(2.5)">
     <g
       stroke="#e7c000"
@@ -15,11 +14,14 @@
       stroke-linejoin="round"
       fill="none"
     >
-      <path d="M11 2v2" />
-      <path d="M5 2v2" />
-      <path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1" />
-      <path d="M8 15a6 6 0 0 0 12 0v-3" />
-      <circle cx="20" cy="10" r="2" />
+      <path d="M10 3H8"/>
+      <path d="m15.007 5.008 3.987 3.986"/>
+      <path d="M20 15v4"/>
+      <path d="M21.174 6.813a2.82 2.82 0 0 0-3.986-3.987L3.842 16.175a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+      <path d="M22 17h-4"/>
+      <path d="M4 5v4"/>
+      <path d="M6 7H2"/>
+      <path d="M9 2v2"/>
     </g>
   </g>
 </svg>
