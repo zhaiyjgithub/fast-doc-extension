@@ -16,17 +16,16 @@
  * Empty string disables Sentry entirely (safe no-op).
  */
 import * as Sentry from '@sentry/react'
+import { isProduction } from './env'
 
 export { Sentry }
 
 export type SentryContext = 'sidepanel' | 'background'
 
 export function sentryDsn(): string {
-  if (import.meta.env.DEV) {
-    const k = import.meta.env.VITE_SENTRY_DSN_DEV ?? import.meta.env.VITE_SENTRY_DSN
-    return k ? String(k) : ''
-  }
-  const k = import.meta.env.VITE_SENTRY_DSN_PROD ?? import.meta.env.VITE_SENTRY_DSN
+  const k = isProduction
+    ? import.meta.env.VITE_SENTRY_DSN_PROD ?? import.meta.env.VITE_SENTRY_DSN
+    : import.meta.env.VITE_SENTRY_DSN_DEV ?? import.meta.env.VITE_SENTRY_DSN
   return k ? String(k) : ''
 }
 

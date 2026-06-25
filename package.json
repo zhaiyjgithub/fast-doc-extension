@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
+    "dev:prod": "wxt --mode production",
     "dev:firefox": "wxt -b firefox",
+    "dev:prod:firefox": "wxt -b firefox --mode production",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
